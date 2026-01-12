@@ -85,6 +85,14 @@ Then places these values in the bin corresponding to each feature value, creatin
 
 A key question: how much accuracy do we lose by finding splits from histogram-binned gradients instead of exact values?
 
+**Gain Formula**: XGBoost evaluates splits using information gain:
+
+```
+gain = (G_left² / (H_left + λ)) + (G_right² / (H_right + λ)) - (G_total² / (H_total + λ))
+```
+
+Where `G` = sum of gradients, `H` = sum of hessians, and `λ` = L2 regularization. Higher gain means a better split.
+
 ![Threshold Comparison](threshold_comparison.png)
 
 **Methodology**: For each feature in the UCI Heart Disease dataset (n=297), we compare:
