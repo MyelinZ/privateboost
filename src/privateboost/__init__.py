@@ -4,9 +4,8 @@ Example:
     >>> from privateboost import Client, ShareHolder, Aggregator
     >>>
     >>> # Setup with 2-of-3 threshold
-    >>> aggregator = Aggregator(n_bins=10, threshold=2, min_clients=10)
     >>> shareholders = [ShareHolder(i, x_coord=i+1, min_clients=10) for i in range(3)]
-    >>> aggregator.set_shareholders(shareholders)
+    >>> aggregator = Aggregator(shareholders, n_bins=10, threshold=2, min_clients=10)
     >>>
     >>> # Create clients
     >>> clients = [Client(f"c{i}", features, target, shareholders, threshold=2) for ...]

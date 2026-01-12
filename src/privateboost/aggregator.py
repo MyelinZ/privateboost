@@ -22,12 +22,23 @@ MIN_HESSIAN_THRESHOLD = 0.1
 class Aggregator:
     """Reconstructs aggregate statistics from shareholder submissions."""
 
-    def __init__(self, n_bins: int = 10, threshold: int = 2, min_clients: int = 10):
+    def __init__(
+        self,
+        shareholders: List[ShareHolder],
+        n_bins: int = 10,
+        threshold: int = 2,
+        min_clients: int = 10,
+    ):
+        if len(shareholders) < threshold:
+            raise ValueError(
+                f"Need at least {threshold} shareholders, got {len(shareholders)}"
+            )
+
+        self._shareholders = shareholders
         self.n_bins = n_bins
         self.threshold = threshold
         self.min_clients = min_clients
 
-        self._shareholders: List[ShareHolder] = []
         self._n_clients: int = 0
         self._n_features: int = 0
         self._means: Optional[np.ndarray] = None
@@ -37,14 +48,6 @@ class Aggregator:
 
         self._next_node_id: int = 1
         self._node_totals: Dict[int, NodeTotals] = {}
-
-    def set_shareholders(self, shareholders: List[ShareHolder]) -> None:
-        """Set the shareholders for this aggregator."""
-        if len(shareholders) < self.threshold:
-            raise ValueError(
-                f"Need at least {self.threshold} shareholders, got {len(shareholders)}"
-            )
-        self._shareholders = shareholders
 
     def _select_shareholders(
         self, round_id: int, round_type: str = "stats"

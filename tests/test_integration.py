@@ -190,12 +190,11 @@ def test_xgboost_heart_disease_shamir(heart_disease_df: pd.DataFrame):
     threshold = 2
     min_clients = 10
 
-    aggregator = Aggregator(n_bins=10, threshold=threshold, min_clients=min_clients)
     shareholders = [
         ShareHolder(party_id=i, x_coord=i + 1, min_clients=min_clients)
         for i in range(3)
     ]
-    aggregator.set_shareholders(shareholders)
+    aggregator = Aggregator(shareholders, n_bins=10, threshold=threshold, min_clients=min_clients)
 
     train_clients = create_clients(
         df_train, FEATURES, shareholders, threshold=threshold
