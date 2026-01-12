@@ -1,0 +1,1 @@
+To reduce network traffic we could avoid sending bad gradients and just send 0
