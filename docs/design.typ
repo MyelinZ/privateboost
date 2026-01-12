@@ -49,7 +49,7 @@ where $a_1, ..., a_(m-1)$ are random coefficients. Each shareholder $i$ receives
 *Reconstruction.* Given any $m$ points, Lagrange interpolation recovers $f(0) = v$:
 
 #align(center)[
-  $v = sum_(j=1)^m y_j product_(k != j) frac(-x_k)(x_j - x_k)$
+  $v = sum_(j=1)^m y_j product_(k != j) frac(-x_k, x_j - x_k)$
 ]
 
 *Linearity.* Shamir sharing is additively homomorphic. If shareholders sum their shares from multiple clients, the result is a valid sharing of the sum:
@@ -128,10 +128,10 @@ Where $g_i$ = gradient, $h_i$ = hessian for sample $i$, and $lambda$ = L2 regula
 
 #figure(
   image("figures/gain_retention.png", width: 100%),
-  caption: [Gain retention by feature on UCI Heart Disease dataset (n=297).]
+  caption: [Gain retention by feature on UCI Heart Disease dataset (n=237 training samples).]
 )
 
-*Results.* privateboost achieves *97.4% mean gain retention* across all features. 11 of 13 features achieve 100% retention—the histogram bins capture the optimal split exactly.
+*Results.* privateboost achieves *98.1% mean gain retention* across all features. 10 of 13 features achieve 100% retention—the histogram bins capture the optimal split exactly.
 
 = Learning Performance
 
@@ -142,14 +142,14 @@ Where $g_i$ = gradient, $h_i$ = hessian for sample $i$, and $lambda$ = L2 regula
 
 *Results.* privateboost achieves *96.5% test accuracy*, comparable to standard XGBoost. The learning curves show similar convergence patterns—privacy preservation does not degrade model quality.
 
-= Limitations
+= Limitations and Future Directions
 
-*No Byzantine protection.* A shareholder or aggregator that deviates from the protocol can corrupt results. The protocol does not detect or prevent malicious behavior.
+*Byzantine protection.* The protocol does not detect shareholders or aggregators that deviate from correct behavior. Two extensions address this: (1) _multiple aggregators_ with majority voting detect corruption at cost of redundant computation, or (2) _secure multi-party computation (MPC)_ among shareholders eliminates the single aggregator entirely. MPC provides stronger guarantees but adds significant latency and message overhead.
 
-*No differential privacy.* Aggregate statistics are revealed exactly. With auxiliary knowledge, an adversary might infer properties about individuals from aggregates.
+*Differential privacy.* Aggregate statistics are revealed exactly, allowing inference attacks with auxiliary knowledge. Adding calibrated noise provides formal guarantees, but noise calibration requires knowing value bounds. For gradient histograms, classification naturally bounds gradients to approximately [-1, 1]. For statistics, either clip contributions or use domain knowledge about feature bounds.
 
-*Communication overhead.* Each client sends `n_shareholders` messages per round. Total messages scale as $O("clients" times "shareholders" times "rounds")$.
+*Communication overhead.* Messages scale as $O("clients" times "shareholders" times "rounds")$. Hierarchical aggregation groups clients under local aggregators that pre-aggregate before forwarding, reducing message count to $O("clients" + "local aggregators" times "shareholders")$—but local aggregators become additional trust points.
 
-*Collusion threshold.* If m shareholders collude with the aggregator, individual values can be reconstructed. Choose m based on trust assumptions.
+*Collusion threshold.* If m shareholders collude with the aggregator, individual values can be reconstructed. Increasing the threshold (e.g., 3-of-5 instead of 2-of-3) raises the bar. Requiring shareholders from different organizations or jurisdictions adds social and legal barriers beyond cryptographic ones.
 
-*Minimum client requirement.* Rounds require at least N clients (e.g., N=10) to preserve privacy. Small client populations cannot participate.
+*Minimum client requirement.* Rounds require at least N clients (e.g., N=10) to preserve privacy. This is fundamental to aggregate-based privacy—with fewer participants, individual contributions become identifiable regardless of cryptographic protections.

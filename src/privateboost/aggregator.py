@@ -11,6 +11,7 @@ from .messages import (
     GradientHistogram,
     LeafNode,
     NodeTotals,
+    RoundType,
     SplitDecision,
 )
 from .shareholder import ShareHolder
@@ -50,7 +51,7 @@ class Aggregator:
         self._node_totals: Dict[int, NodeTotals] = {}
 
     def _select_shareholders(
-        self, round_id: int, round_type: str = "stats"
+        self, round_id: int, round_type: RoundType = "stats"
     ) -> Tuple[List[ShareHolder], List[bytes]]:
         """Select shareholders with largest commitment overlap (for threshold=2)."""
         sh_commitments = [
@@ -74,7 +75,7 @@ class Aggregator:
         return best_pair, list(best_overlap)
 
     def _select_shareholders_for_threshold(
-        self, round_id: int, round_type: str = "stats"
+        self, round_id: int, round_type: RoundType = "stats"
     ) -> Tuple[List[ShareHolder], List[bytes]]:
         """Select `threshold` shareholders with largest commitment overlap."""
         if self.threshold == 2:

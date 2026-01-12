@@ -46,9 +46,9 @@ Clients          ShareHolders       Aggregator
 
 - **`aggregator.py`**: Selects shareholders with largest commitment overlap, reconstructs aggregates using Lagrange interpolation. Computes mean/variance, defines histogram bins, finds optimal splits.
 
-- **`crypto.py`**: Shamir sharing (`shamir_share_vector`, `shamir_reconstruct_vector`) and commitment scheme (`compute_commitment`).
+- **`crypto/`**: Shamir sharing (`share`, `reconstruct`, `Share` dataclass) and commitment scheme (`compute_commitment`).
 
-- **`messages.py`**: Data classes (`ShamirShare`, `CommittedStatsShare`, `CommittedGradientShare`, `BinConfiguration`, `SplitDecision`, `LeafNode`).
+- **`messages.py`**: Data classes (`CommittedStatsShare`, `CommittedGradientShare`, `BinConfiguration`, `SplitDecision`, `LeafNode`).
 
 ### Protocol Flow
 

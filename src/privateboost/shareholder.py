@@ -5,7 +5,7 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 
 from .crypto import Share
-from .messages import CommittedGradientShare, CommittedStatsShare
+from .messages import CommittedGradientShare, CommittedStatsShare, RoundType
 
 
 class ShareHolder:
@@ -38,7 +38,7 @@ class ShareHolder:
             self._gradients[msg.round_id][msg.commitment] = {}
         self._gradients[msg.round_id][msg.commitment][msg.node_id] = msg.share
 
-    def get_commitments(self, round_id: int, round_type: str = "stats") -> Set[bytes]:
+    def get_commitments(self, round_id: int, round_type: RoundType = "stats") -> Set[bytes]:
         """Get set of commitments received for a round."""
         if round_type == "stats":
             return set(self._stats.get(round_id, {}).keys())

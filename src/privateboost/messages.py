@@ -8,6 +8,7 @@ import numpy as np
 from .crypto import Share
 
 Loss = Literal["squared", "logistic"]
+RoundType = Literal["stats", "gradients"]
 
 
 @dataclass
