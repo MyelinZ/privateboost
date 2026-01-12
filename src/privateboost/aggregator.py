@@ -192,13 +192,17 @@ class Aggregator:
         depth: int,
         min_gain: float = 0.0,
         min_samples: int = 1,
-    ) -> None:
-        """Compute and store the best split for each active node."""
+    ) -> bool:
+        """Compute and store the best split for each active node.
+
+        Returns True if any new splits were found at this depth.
+        """
         if depth == 0:
             self._next_node_id = 1
             self._node_totals.clear()
             self._splits.clear()
 
+        n_splits_before = len(self._splits)
         selected_shs, commitments = self._select_gradient_shareholders(round_id, depth)
 
         active_nodes = set()
@@ -294,6 +298,8 @@ class Aggregator:
                     gradient_sum=best_split.g_right, hessian_sum=best_split.h_right
                 )
                 self._next_node_id += 2
+
+        return len(self._splits) > n_splits_before
 
     @property
     def splits(self) -> Dict[int, SplitDecision]:

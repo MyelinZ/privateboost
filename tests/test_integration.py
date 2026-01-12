@@ -97,12 +97,12 @@ def train_tree(
                 bins, aggregator.model, aggregator.splits, round_id=round_id, depth=depth, loss="squared"
             )
 
-        aggregator.compute_splits(
+        found_split = aggregator.compute_splits(
             round_id=round_id,
             depth=depth,
             min_samples=5,
         )
-        if not aggregator.splits:
+        if not found_split:
             break
 
     aggregator.finish_round()
