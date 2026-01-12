@@ -57,6 +57,28 @@ Each shareholder receives one share—individually meaningless random noise.
 1. **Statistics round** — clients share `x` and `x²` to compute global mean/variance for histogram binning
 2. **Gradient rounds** — for each tree level, clients share gradient histograms; the aggregator finds optimal splits and broadcasts decisions back to clients
 
+## Histogram Construction
+
+**Bin Definition**: After the statistics round, the aggregator knows the global mean (μ) and standard deviation (σ) for each feature. It defines histogram bins spanning μ ± 3σ, divided into `n_bins` equal-width intervals, plus underflow and overflow bins for outliers:
+
+```
+edges = [-∞, μ-3σ, ..., μ+3σ, +∞]
+```
+
+This creates `n_bins + 2` total bins per feature.
+
+**One-Hot Voting**: To privately count how many clients fall in each bin, each client encodes its bin as a one-hot vector (all zeros except a 1 at the bin index), then secret-shares this vector. When shareholders sum their shares and the aggregator reconstructs, the result is a histogram of counts—without revealing which client contributed to which bin.
+
+```
+Client value: 42.5 → bin index 3 → [0, 0, 0, 1, 0, ...] → secret-share
+```
+
+**Gradient Histograms**: For XGBoost, clients don't just vote "present"—they contribute their gradient and hessian to the appropriate bin. Each client computes:
+- `gradient = prediction - target` (for squared loss)
+- `hessian = 1.0` (or `p(1-p)` for logistic loss)
+
+Then places these values in the bin corresponding to each feature value, creating per-feature gradient/hessian vectors that are secret-shared. The aggregator reconstructs summed gradients per bin, enabling it to find the optimal split threshold by evaluating cumulative gain across bin boundaries.
+
 ## Security Guarantees
 
 **Confidentiality**: No single party learns individual client values. Shareholders see only random shares; the aggregator sees only aggregate sums across all clients.
