@@ -1,7 +1,7 @@
 """Aggregator class for privacy-preserving federated learning."""
 
 from itertools import combinations
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -55,37 +55,12 @@ class Aggregator:
         self._node_totals: Dict[int, NodeTotals] = {}
         self._splits: Dict[int, SplitDecision] = {}
 
-    def _select_stats_shareholders(self) -> Tuple[List[ShareHolder], List[bytes]]:
-        """Select shareholders with largest stats commitment overlap."""
-        sh_commitments = [
-            (sh, sh.get_stats_commitments()) for sh in self._shareholders
-        ]
-
-        best_overlap: Set[bytes] = set()
-        best_group: List[ShareHolder] = []
-
-        for combo in combinations(sh_commitments, self.threshold):
-            shareholders = [sh for sh, _ in combo]
-            commit_sets = [commits for _, commits in combo]
-            overlap = set.intersection(*commit_sets)
-
-            if len(overlap) > len(best_overlap):
-                best_overlap = overlap
-                best_group = shareholders
-
-        if len(best_overlap) < self.min_clients:
-            raise ValueError(
-                f"Best overlap has {len(best_overlap)} clients, need {self.min_clients}"
-            )
-
-        return best_group, list(best_overlap)
-
-    def _select_gradient_shareholders(
-        self, round_id: int, depth: int
+    def _select_shareholders(
+        self, get_commitments: Callable[[ShareHolder], Set[bytes]]
     ) -> Tuple[List[ShareHolder], List[bytes]]:
-        """Select shareholders with largest gradient commitment overlap for a round."""
+        """Select threshold shareholders with largest commitment overlap."""
         sh_commitments = [
-            (sh, sh.get_gradient_commitments(round_id, depth)) for sh in self._shareholders
+            (sh, get_commitments(sh)) for sh in self._shareholders
         ]
 
         best_overlap: Set[bytes] = set()
@@ -125,7 +100,6 @@ class Aggregator:
     def _collect_gradient_shares(
         self,
         selected_shs: List[ShareHolder],
-        round_id: int,
         depth: int,
         commitments: List[bytes],
         node_id: int,
@@ -134,7 +108,7 @@ class Aggregator:
         shares = []
         for sh in selected_shs:
             try:
-                x, y = sh.get_gradients_sum(round_id, depth, commitments, node_id)
+                x, y = sh.get_gradients_sum(depth, commitments, node_id)
                 shares.append(Share(x=x, y=y))
             except ValueError:
                 continue
@@ -142,7 +116,9 @@ class Aggregator:
 
     def define_bins(self) -> List[BinConfiguration]:
         """Reconstruct statistics and define histogram bins."""
-        selected_shs, commitments = self._select_stats_shareholders()
+        selected_shs, commitments = self._select_shareholders(
+            lambda sh: sh.get_stats_commitments()
+        )
         self._n_clients = len(commitments)
 
         shares = self._collect_stats_shares(selected_shs, commitments)
@@ -188,7 +164,6 @@ class Aggregator:
 
     def compute_splits(
         self,
-        round_id: int,
         depth: int,
         min_gain: float = 0.0,
         min_samples: int = 1,
@@ -203,15 +178,17 @@ class Aggregator:
             self._splits.clear()
 
         n_splits_before = len(self._splits)
-        selected_shs, commitments = self._select_gradient_shareholders(round_id, depth)
+        selected_shs, commitments = self._select_shareholders(
+            lambda sh: sh.get_gradient_commitments(depth)
+        )
 
-        active_nodes = set()
+        active_nodes: Set[int] = set()
         for sh in selected_shs:
-            active_nodes.update(sh.get_gradient_node_ids(round_id, depth))
+            active_nodes.update(sh.get_gradient_node_ids(depth))
 
         for node_id in active_nodes:
             shares = self._collect_gradient_shares(
-                selected_shs, round_id, depth, commitments, node_id
+                selected_shs, depth, commitments, node_id
             )
 
             if len(shares) < self.threshold:
@@ -238,6 +215,7 @@ class Aggregator:
             best_gain = min_gain
             best_split = None
 
+            # Each feature's histogram sums to the same total (one bin per client per feature)
             total_g = histograms[0].gradient.sum()
             total_h = histograms[0].hessian.sum()
 

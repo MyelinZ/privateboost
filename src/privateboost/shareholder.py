@@ -1,11 +1,20 @@
 """ShareHolder class for privacy-preserving federated learning."""
 
+from collections import defaultdict
 from typing import Dict, List, Set, Tuple
 
 import numpy as np
 
 from .crypto import Share
 from .messages import CommittedGradientShare, CommittedStatsShare
+
+# Type alias for gradient storage: depth -> commitment -> node_id -> Share
+GradientStore = Dict[int, Dict[bytes, Dict[int, Share]]]
+
+
+def _new_gradient_store() -> GradientStore:
+    """Create a new nested defaultdict for gradient storage."""
+    return defaultdict(lambda: defaultdict(dict))
 
 
 class ShareHolder:
@@ -22,8 +31,7 @@ class ShareHolder:
         self.min_clients = min_clients
 
         self._stats: Dict[bytes, Share] = {}
-        # Key: (round_id, depth) -> commitment -> node_id -> Share
-        self._gradients: Dict[Tuple[int, int], Dict[bytes, Dict[int, Share]]] = {}
+        self._gradients: GradientStore = _new_gradient_store()
         self._current_round_id: int = -1
 
     def receive_stats(self, msg: CommittedStatsShare) -> None:
@@ -33,30 +41,23 @@ class ShareHolder:
     def receive_gradients(self, msg: CommittedGradientShare) -> None:
         """Receive and store gradient share from a client."""
         if msg.round_id > self._current_round_id:
-            # New round started - clear previous round's data
-            self._gradients.clear()
+            self._gradients = _new_gradient_store()
             self._current_round_id = msg.round_id
 
-        key = (msg.round_id, msg.depth)
-        if key not in self._gradients:
-            self._gradients[key] = {}
-        if msg.commitment not in self._gradients[key]:
-            self._gradients[key][msg.commitment] = {}
-        self._gradients[key][msg.commitment][msg.node_id] = msg.share
+        self._gradients[msg.depth][msg.commitment][msg.node_id] = msg.share
 
     def get_stats_commitments(self) -> Set[bytes]:
         """Get set of commitments received for stats."""
         return set(self._stats.keys())
 
-    def get_gradient_commitments(self, round_id: int, depth: int) -> Set[bytes]:
-        """Get set of commitments received for a gradient round."""
-        return set(self._gradients.get((round_id, depth), {}).keys())
+    def get_gradient_commitments(self, depth: int) -> Set[bytes]:
+        """Get set of commitments received for a depth."""
+        return set(self._gradients.get(depth, {}).keys())
 
-    def get_gradient_node_ids(self, round_id: int, depth: int) -> Set[int]:
-        """Get set of node_ids that have gradient data for a round/depth."""
-        round_data = self._gradients.get((round_id, depth), {})
+    def get_gradient_node_ids(self, depth: int) -> Set[int]:
+        """Get set of node_ids that have gradient data for a depth."""
         node_ids: Set[int] = set()
-        for client_nodes in round_data.values():
+        for client_nodes in self._gradients.get(depth, {}).values():
             node_ids.update(client_nodes.keys())
         return node_ids
 
@@ -85,7 +86,7 @@ class ShareHolder:
         return (self.x_coord, total_y)
 
     def get_gradients_sum(
-        self, round_id: int, depth: int, commitments: List[bytes], node_id: int
+        self, depth: int, commitments: List[bytes], node_id: int
     ) -> Tuple[int, np.ndarray]:
         """Sum gradient shares for requested commitments and node."""
         if len(commitments) < self.min_clients:
@@ -93,11 +94,11 @@ class ShareHolder:
                 f"Requested {len(commitments)} clients, minimum is {self.min_clients}"
             )
 
-        round_data = self._gradients.get((round_id, depth), {})
+        depth_data = self._gradients.get(depth, {})
         total_y = None
 
         for commitment in commitments:
-            client_nodes = round_data.get(commitment, {})
+            client_nodes = depth_data.get(commitment, {})
             s = client_nodes.get(node_id)
 
             if s is not None:
@@ -114,4 +115,4 @@ class ShareHolder:
     def reset(self) -> None:
         """Clear all accumulated data."""
         self._stats.clear()
-        self._gradients.clear()
+        self._gradients = _new_gradient_store()
