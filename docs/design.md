@@ -93,15 +93,15 @@ gain = (G_left² / (H_left + λ)) + (G_right² / (H_right + λ)) - (G_total² / 
 
 Where `G` = sum of gradients, `H` = sum of hessians, and `λ` = L2 regularization. Higher gain means a better split.
 
-![Threshold Comparison](threshold_comparison.png)
+![Gain Retention](gain_retention.png)
 
-**Methodology**: For each feature in the UCI Heart Disease dataset (n=297), we compare:
-- **Optimal threshold** (red circles): exhaustive search over all possible split points on raw data
-- **privateboost threshold** (green squares): best split found from 10-bin gradient histograms
+**Methodology**: For each feature in the UCI Heart Disease dataset (n=297), we compute the best split gain using:
+- **Optimal**: exhaustive search over all possible split points on raw data
+- **privateboost**: best split found from 10-bin gradient histograms
 
-The x-axis shows where each threshold falls within the feature's value range (0 = minimum, 1 = maximum). Blue lines connect the two thresholds for each feature—shorter lines mean closer agreement.
+Gain retention = (privateboost gain / optimal gain) × 100%. The bar chart shows retention per feature, colored by quality: green (≥99%), orange (≥90%), red (<90%).
 
-**Results**: privateboost achieves **98.1% mean gain retention** across all features. Most features match the optimal split almost exactly. The histogram discretization occasionally shifts the threshold slightly, but rarely affects the information gain significantly.
+**Results**: privateboost achieves **97.4% mean gain retention** across all features. 11 of 13 features achieve 100% retention—the histogram bins capture the optimal split exactly. Two features (chol, thalach) show slight loss due to the discretization, but still retain over 84% of the optimal gain.
 
 This demonstrates that the privacy-preserving histogram approach sacrifices minimal predictive accuracy while fully protecting individual data points.
 
