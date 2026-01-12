@@ -5,38 +5,32 @@
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Clients
-        C1[Client 1]
-        C2[Client 2]
-        C3[Client N]
+flowchart TB
+    subgraph Aggregator
+        AGG[Aggregator]
     end
+
+    NOTE["#128065; Aggregator sees:<br/>Σx, Σx²<br/>histogram counts<br/>gradient/hessian sums"]
 
     subgraph ShareHolders
-        SH1[ShareHolder 1]
-        SH2[ShareHolder 2]
-        SH3[ShareHolder 3]
+        direction LR
+        SH1[SH 1] ~~~ SH2[SH 2] ~~~ SH3[SH 3]
     end
 
-    AGG[Aggregator]
+    subgraph Clients
+        direction LR
+        C1[Client 1] ~~~ C2[Client 2] ~~~ C3[Client N]
+    end
 
-    C1 -->|share₁| SH1
-    C1 -->|share₂| SH2
-    C1 -->|share₃| SH3
+    subgraph Legend
+        direction LR
+        L["x = feature value<br/>Σ = sum over all clients"]
+    end
 
-    C2 -->|share₁| SH1
-    C2 -->|share₂| SH2
-    C2 -->|share₃| SH3
-
-    C3 -->|share₁| SH1
-    C3 -->|share₂| SH2
-    C3 -->|share₃| SH3
-
-    SH1 -->|sum₁| AGG
-    SH2 -->|sum₂| AGG
-    SH3 -->|sum₃| AGG
-
-    AGG -->|splits & leaves| Clients
+    Clients -->|"shares of x, x², votes, gradients, hessians"| ShareHolders
+    ShareHolders -->|"partial sums"| Aggregator
+    Aggregator -->|"bin configs, splits, leaves"| Clients
+    AGG ~~~ NOTE
 ```
 
 Each client's value `v` is split into random shares where `share₁ + share₂ + share₃ = v`. Shareholders sum shares across all clients, then the aggregator reconstructs the total: `sum₁ + sum₂ + sum₃ = Σv`.
@@ -86,6 +80,22 @@ Then places these values in the bin corresponding to each feature value, creatin
 **Collusion Resistance**: Reconstructing any individual value requires *all* shareholders to collude. With 3 shareholders, any 2 colluding still cannot recover client data—they're missing one share, which is random and unbounded.
 
 **Threat Model**: The protocol assumes *honest-but-curious* adversaries—parties follow the protocol correctly but may try to learn extra information from messages they receive. All parties are assumed to execute the prescribed algorithms faithfully.
+
+## Split Quality Analysis
+
+A key question: how much accuracy do we lose by finding splits from histogram-binned gradients instead of exact values?
+
+![Threshold Comparison](threshold_comparison.png)
+
+**Methodology**: For each feature in the UCI Heart Disease dataset (n=297), we compare:
+- **Optimal threshold** (red circles): exhaustive search over all possible split points on raw data
+- **privateboost threshold** (green squares): best split found from 10-bin gradient histograms
+
+The x-axis shows where each threshold falls within the feature's value range (0 = minimum, 1 = maximum). Blue lines connect the two thresholds for each feature—shorter lines mean closer agreement.
+
+**Results**: privateboost achieves **98.1% mean gain retention** across all features. Most features match the optimal split almost exactly. The histogram discretization occasionally shifts the threshold slightly, but rarely affects the information gain significantly.
+
+This demonstrates that the privacy-preserving histogram approach sacrifices minimal predictive accuracy while fully protecting individual data points.
 
 ## Limitations
 
