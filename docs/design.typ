@@ -153,3 +153,16 @@ Where $g_i$ = gradient, $h_i$ = hessian for sample $i$, and $lambda$ = L2 regula
 *Collusion threshold.* If m shareholders collude with the aggregator, individual values can be reconstructed. Increasing the threshold (e.g., 3-of-5 instead of 2-of-3) raises the bar. Requiring shareholders from different organizations or jurisdictions adds social and legal barriers beyond cryptographic ones.
 
 *Minimum client requirement.* Rounds require at least N clients (e.g., N=10) to preserve privacy. This is fundamental to aggregate-based privacy—with fewer participants, individual contributions become identifiable regardless of cryptographic protections.
+
+*Node path leakage.* During tree construction, clients submit gradients tagged with their current node ID. This reveals to shareholders which tree path each client follows—leaking information about feature values (e.g., "client A went left at the age≤50 split"). While shareholders cannot see the actual gradient values (only Shamir shares), the node membership pattern is visible.
+
+_Mitigation: Zero-padding._ Clients submit gradient shares for _all_ possible nodes at each depth, with zeros for nodes they are not in. Since Shamir shares of zero look random, shareholders cannot distinguish real from dummy submissions. Shareholders sum position-wise without learning node membership.
+
+_Overhead._ Communication increases by $O(2^d)$ where $d$ is tree depth. For typical depths:
+- Depth 3: 8× overhead
+- Depth 4: 16× overhead
+- Depth 5: 32× overhead
+
+This is bounded by `max_depth`, a hyperparameter already constrained for model complexity reasons.
+
+_Alternative: Secure computation._ More advanced techniques (garbled circuits, function secret sharing) could partition gradient sums obliviously—shareholders aggregate without learning which clients belong to which partition. This eliminates the $O(2^d)$ overhead but requires complex MPC protocols with higher latency. For most deployments, the zero-padding approach offers a practical trade-off.

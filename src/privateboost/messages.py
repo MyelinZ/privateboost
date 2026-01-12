@@ -8,29 +8,24 @@ import numpy as np
 from .crypto import Share
 
 Loss = Literal["squared", "logistic"]
-RoundType = Literal["stats", "gradients"]
 
 
 @dataclass
-class CommittedShare:
-    """Base class for shares with commitment."""
+class CommittedStatsShare:
+    """Stats share: y contains [x0, x0², x1, x1², ..., target, target²]."""
 
-    round_id: int
     commitment: bytes
     share: Share
 
 
 @dataclass
-class CommittedStatsShare(CommittedShare):
-    """Stats share: y contains [x0, x0², x1, x1², ..., target, target²]."""
-
-    pass
-
-
-@dataclass
-class CommittedGradientShare(CommittedShare):
+class CommittedGradientShare:
     """Gradient share for a specific tree node."""
 
+    round_id: int
+    depth: int
+    commitment: bytes
+    share: Share
     node_id: int
 
 

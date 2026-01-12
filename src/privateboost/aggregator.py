@@ -9,12 +9,11 @@ from .crypto import Share, reconstruct
 from .messages import (
     BinConfiguration,
     GradientHistogram,
-    LeafNode,
     NodeTotals,
-    RoundType,
     SplitDecision,
 )
 from .shareholder import ShareHolder
+from .tree import Leaf, Model, SplitNode, Tree, TreeNode
 
 BIN_RANGE_STDS = 3
 MIN_HESSIAN_THRESHOLD = 0.1
@@ -29,6 +28,8 @@ class Aggregator:
         n_bins: int = 10,
         threshold: int = 2,
         min_clients: int = 10,
+        learning_rate: float = 0.1,
+        lambda_reg: float = 1.0,
     ):
         if len(shareholders) < threshold:
             raise ValueError(
@@ -39,6 +40,8 @@ class Aggregator:
         self.n_bins = n_bins
         self.threshold = threshold
         self.min_clients = min_clients
+        self.learning_rate = learning_rate
+        self.lambda_reg = lambda_reg
 
         self._n_clients: int = 0
         self._n_features: int = 0
@@ -46,43 +49,16 @@ class Aggregator:
         self._variances: Optional[np.ndarray] = None
         self._stds: Optional[np.ndarray] = None
         self._bin_configs: List[BinConfiguration] = []
+        self._model = Model(initial_prediction=0.0, learning_rate=learning_rate)
 
         self._next_node_id: int = 1
         self._node_totals: Dict[int, NodeTotals] = {}
+        self._splits: Dict[int, SplitDecision] = {}
 
-    def _select_shareholders(
-        self, round_id: int, round_type: RoundType = "stats"
-    ) -> Tuple[List[ShareHolder], List[bytes]]:
-        """Select shareholders with largest commitment overlap (for threshold=2)."""
+    def _select_stats_shareholders(self) -> Tuple[List[ShareHolder], List[bytes]]:
+        """Select shareholders with largest stats commitment overlap."""
         sh_commitments = [
-            (sh, sh.get_commitments(round_id, round_type)) for sh in self._shareholders
-        ]
-
-        best_overlap: Set[bytes] = set()
-        best_pair: List[ShareHolder] = []
-
-        for (sh_a, commits_a), (sh_b, commits_b) in combinations(sh_commitments, 2):
-            overlap = commits_a & commits_b
-            if len(overlap) > len(best_overlap):
-                best_overlap = overlap
-                best_pair = [sh_a, sh_b]
-
-        if len(best_overlap) < self.min_clients:
-            raise ValueError(
-                f"Best overlap has {len(best_overlap)} clients, need {self.min_clients}"
-            )
-
-        return best_pair, list(best_overlap)
-
-    def _select_shareholders_for_threshold(
-        self, round_id: int, round_type: RoundType = "stats"
-    ) -> Tuple[List[ShareHolder], List[bytes]]:
-        """Select `threshold` shareholders with largest commitment overlap."""
-        if self.threshold == 2:
-            return self._select_shareholders(round_id, round_type)
-
-        sh_commitments = [
-            (sh, sh.get_commitments(round_id, round_type)) for sh in self._shareholders
+            (sh, sh.get_stats_commitments()) for sh in self._shareholders
         ]
 
         best_overlap: Set[bytes] = set()
@@ -104,34 +80,72 @@ class Aggregator:
 
         return best_group, list(best_overlap)
 
-    def _collect_shares(
+    def _select_gradient_shareholders(
+        self, round_id: int, depth: int
+    ) -> Tuple[List[ShareHolder], List[bytes]]:
+        """Select shareholders with largest gradient commitment overlap for a round."""
+        sh_commitments = [
+            (sh, sh.get_gradient_commitments(round_id, depth)) for sh in self._shareholders
+        ]
+
+        best_overlap: Set[bytes] = set()
+        best_group: List[ShareHolder] = []
+
+        for combo in combinations(sh_commitments, self.threshold):
+            shareholders = [sh for sh, _ in combo]
+            commit_sets = [commits for _, commits in combo]
+            overlap = set.intersection(*commit_sets)
+
+            if len(overlap) > len(best_overlap):
+                best_overlap = overlap
+                best_group = shareholders
+
+        if len(best_overlap) < self.min_clients:
+            raise ValueError(
+                f"Best overlap has {len(best_overlap)} clients, need {self.min_clients}"
+            )
+
+        return best_group, list(best_overlap)
+
+    def _collect_stats_shares(
         self,
         selected_shs: List[ShareHolder],
-        round_id: int,
         commitments: List[bytes],
-        node_id: Optional[int] = None,
     ) -> List[Share]:
-        """Collect summed shares from shareholders."""
+        """Collect summed stats shares from shareholders."""
         shares = []
         for sh in selected_shs:
             try:
-                if node_id is None:
-                    x, y = sh.get_stats_sum(round_id, commitments)
-                else:
-                    x, y = sh.get_gradients_sum(round_id, commitments, node_id)
+                x, y = sh.get_stats_sum(commitments)
                 shares.append(Share(x=x, y=y))
             except ValueError:
                 continue
         return shares
 
-    def define_bins(self, round_id: int = 0) -> List[BinConfiguration]:
+    def _collect_gradient_shares(
+        self,
+        selected_shs: List[ShareHolder],
+        round_id: int,
+        depth: int,
+        commitments: List[bytes],
+        node_id: int,
+    ) -> List[Share]:
+        """Collect summed gradient shares from shareholders."""
+        shares = []
+        for sh in selected_shs:
+            try:
+                x, y = sh.get_gradients_sum(round_id, depth, commitments, node_id)
+                shares.append(Share(x=x, y=y))
+            except ValueError:
+                continue
+        return shares
+
+    def define_bins(self) -> List[BinConfiguration]:
         """Reconstruct statistics and define histogram bins."""
-        selected_shs, commitments = self._select_shareholders_for_threshold(
-            round_id, "stats"
-        )
+        selected_shs, commitments = self._select_stats_shareholders()
         self._n_clients = len(commitments)
 
-        shares = self._collect_shares(selected_shs, round_id, commitments)
+        shares = self._collect_stats_shares(selected_shs, commitments)
         totals = reconstruct(shares, threshold=self.threshold)
 
         n_values = len(totals)
@@ -168,25 +182,33 @@ class Aggregator:
                 n_bins=self.n_bins,
             ))
 
+        self._model.initial_prediction = float(self._means[-1])
+
         return self._bin_configs
 
-    def find_best_splits(
+    def compute_splits(
         self,
         round_id: int,
-        active_nodes: List[int],
-        lambda_reg: float = 1.0,
+        depth: int,
         min_gain: float = 0.0,
         min_samples: int = 1,
-    ) -> Dict[int, SplitDecision]:
-        """Find the best split for each active node."""
-        selected_shs, commitments = self._select_shareholders_for_threshold(
-            round_id, "gradients"
-        )
+    ) -> None:
+        """Compute and store the best split for each active node."""
+        if depth == 0:
+            self._next_node_id = 1
+            self._node_totals.clear()
+            self._splits.clear()
 
-        splits: Dict[int, SplitDecision] = {}
+        selected_shs, commitments = self._select_gradient_shareholders(round_id, depth)
+
+        active_nodes = set()
+        for sh in selected_shs:
+            active_nodes.update(sh.get_gradient_node_ids(round_id, depth))
 
         for node_id in active_nodes:
-            shares = self._collect_shares(selected_shs, round_id, commitments, node_id)
+            shares = self._collect_gradient_shares(
+                selected_shs, round_id, depth, commitments, node_id
+            )
 
             if len(shares) < self.threshold:
                 continue
@@ -223,7 +245,7 @@ class Aggregator:
             if n_samples < min_samples:
                 continue
 
-            base_score = (total_g**2) / (total_h + lambda_reg)
+            base_score = (total_g**2) / (total_h + self.lambda_reg)
 
             for feature_idx, hist in enumerate(histograms):
                 if feature_idx >= len(self._bin_configs):
@@ -242,8 +264,8 @@ class Aggregator:
                     if h_left < MIN_HESSIAN_THRESHOLD or h_right < MIN_HESSIAN_THRESHOLD:
                         continue
 
-                    left_score = (g_left**2) / (h_left + lambda_reg)
-                    right_score = (g_right**2) / (h_right + lambda_reg)
+                    left_score = (g_left**2) / (h_left + self.lambda_reg)
+                    right_score = (g_right**2) / (h_right + self.lambda_reg)
                     gain = left_score + right_score - base_score
 
                     if gain > best_gain:
@@ -264,54 +286,57 @@ class Aggregator:
                         )
 
             if best_split is not None:
-                splits[node_id] = best_split
+                self._splits[node_id] = best_split
+                self._node_totals[best_split.left_child_id] = NodeTotals(
+                    gradient_sum=best_split.g_left, hessian_sum=best_split.h_left
+                )
+                self._node_totals[best_split.right_child_id] = NodeTotals(
+                    gradient_sum=best_split.g_right, hessian_sum=best_split.h_right
+                )
                 self._next_node_id += 2
 
-        return splits
+    @property
+    def splits(self) -> Dict[int, SplitDecision]:
+        """Return the current split decisions."""
+        return self._splits
 
-    def compute_leaf_values(
-        self,
-        round_id: int,
-        leaf_nodes: List[int],
-        lambda_reg: float = 1.0,
-    ) -> Dict[int, LeafNode]:
-        """Compute prediction values for leaf nodes."""
-        selected_shs, commitments = self._select_shareholders_for_threshold(
-            round_id, "gradients"
-        )
+    def finish_round(self) -> None:
+        """Finalize the current round by building a tree from splits and adding to model."""
 
-        leaves: Dict[int, LeafNode] = {}
-
-        for node_id in leaf_nodes:
+        def compute_leaf_value(node_id: int) -> Leaf:
             if node_id in self._node_totals:
                 totals = self._node_totals[node_id]
                 total_g, total_h = totals.gradient_sum, totals.hessian_sum
             else:
-                shares = self._collect_shares(selected_shs, round_id, commitments, node_id)
+                total_g, total_h = 0.0, 0.0
 
-                if len(shares) < self.threshold:
-                    total_g, total_h = 0.0, 0.0
-                else:
-                    totals_arr = reconstruct(shares, threshold=self.threshold)
-                    n_bins_total = self.n_bins + 2
-                    n_features = self._n_features
-                    grad_size = n_features * n_bins_total
-
-                    total_g = totals_arr[:grad_size].sum() / n_features
-                    total_h = totals_arr[grad_size:].sum() / n_features
-
-            if total_h + lambda_reg > 0:
-                value = -total_g / (total_h + lambda_reg)
+            if total_h + self.lambda_reg > 0:
+                value = -total_g / (total_h + self.lambda_reg)
             else:
                 value = 0.0
 
-            leaves[node_id] = LeafNode(
-                node_id=node_id,
-                value=value,
-                n_samples=int(round(total_h)),
-            )
+            return Leaf(value=value, n_samples=int(round(total_h)))
 
-        return leaves
+        def build_node(node_id: int) -> TreeNode:
+            if node_id in self._splits:
+                split = self._splits[node_id]
+                return SplitNode(
+                    feature_idx=split.feature_idx,
+                    threshold=split.threshold,
+                    gain=split.gain,
+                    left=build_node(split.left_child_id),
+                    right=build_node(split.right_child_id),
+                )
+            else:
+                return compute_leaf_value(node_id)
+
+        tree = Tree(root=build_node(0))
+        self._model.add_tree(tree)
+
+    @property
+    def model(self) -> Model:
+        """Return the current model with all built trees."""
+        return self._model
 
     @property
     def means(self) -> Optional[np.ndarray]:
@@ -335,12 +360,10 @@ class Aggregator:
         self._variances = None
         self._stds = None
         self._bin_configs = []
+        self._model = Model(initial_prediction=0.0, learning_rate=self.learning_rate)
         self._n_clients = 0
         self._n_features = 0
         self._next_node_id = 1
         self._node_totals.clear()
+        self._splits.clear()
 
-    def reset_tree(self) -> None:
-        """Reset state for a new tree."""
-        self._next_node_id = 1
-        self._node_totals.clear()

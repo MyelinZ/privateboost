@@ -1,6 +1,6 @@
 """Integration tests: Federated XGBoost with Shamir secret sharing."""
 
-from typing import Dict, List
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -10,9 +10,7 @@ from privateboost import (
     Aggregator,
     BinConfiguration,
     Client,
-    LeafNode,
     ShareHolder,
-    SplitDecision,
 )
 
 FEATURES = [
@@ -62,7 +60,7 @@ def create_clients(
     return [
         Client(
             client_id=f"client_{idx}",
-            features=[float(row[name]) for name in features],
+            features=row[features].values,
             target=float(row["target"]),
             shareholders=shareholders,
             threshold=threshold,
@@ -74,13 +72,12 @@ def create_clients(
 def compute_initial_statistics(
     clients: List[Client],
     aggregator: Aggregator,
-    round_id: int = 0,
 ) -> tuple[List[BinConfiguration], float]:
-    """Run statistics round to compute bins and initial prediction."""
+    """Compute bins and initial prediction from client statistics."""
     for client in clients:
-        client.submit_stats(round_id=round_id)
+        client.submit_stats()
 
-    bins = aggregator.define_bins(round_id=round_id)
+    bins = aggregator.define_bins()
     initial_pred = float(aggregator.means[-1])
 
     return bins, initial_pred
@@ -91,91 +88,24 @@ def train_tree(
     aggregator: Aggregator,
     bins: List[BinConfiguration],
     max_depth: int,
-    lambda_reg: float,
-    learning_rate: float,
-    base_round_id: int,
-) -> tuple[Dict[int, SplitDecision], Dict[int, LeafNode]]:
-    """Train a single tree and update client predictions."""
-    aggregator.reset_tree()
-    for client in clients:
-        client.reset_node()
-
-    all_splits: Dict[int, SplitDecision] = {}
-    active_nodes = [0]
-
+    round_id: int,
+) -> None:
+    """Train a single tree."""
     for depth in range(max_depth):
-        round_id = base_round_id + depth
-
         for client in clients:
             client.submit_gradients(
-                bins, active_nodes, round_id=round_id, loss="squared"
+                bins, aggregator.model, aggregator.splits, round_id=round_id, depth=depth, loss="squared"
             )
 
-        splits = aggregator.find_best_splits(
+        aggregator.compute_splits(
             round_id=round_id,
-            active_nodes=active_nodes,
-            lambda_reg=lambda_reg,
+            depth=depth,
             min_samples=5,
         )
-        if not splits:
+        if not aggregator.splits:
             break
 
-        all_splits.update(splits)
-
-        for client in clients:
-            client.apply_splits(splits)
-
-        active_nodes = []
-        for split in splits.values():
-            active_nodes.extend([split.left_child_id, split.right_child_id])
-
-    split_node_ids = set(all_splits.keys())
-    all_child_ids = set()
-    for split in all_splits.values():
-        all_child_ids.add(split.left_child_id)
-        all_child_ids.add(split.right_child_id)
-
-    leaf_node_ids = list(all_child_ids - split_node_ids)
-    if 0 not in split_node_ids:
-        leaf_node_ids.append(0)
-
-    leaf_round_id = base_round_id + max_depth
-    for client in clients:
-        client.submit_gradients(
-            bins, leaf_node_ids, round_id=leaf_round_id, loss="squared"
-        )
-
-    leaves = aggregator.compute_leaf_values(
-        round_id=leaf_round_id,
-        leaf_nodes=leaf_node_ids,
-        lambda_reg=lambda_reg,
-    )
-
-    for client in clients:
-        client.update_prediction(leaves, learning_rate)
-
-    return all_splits, leaves
-
-
-def predict_sample(
-    features: List[float],
-    trees: List[tuple[Dict[int, SplitDecision], Dict[int, LeafNode]]],
-    initial_pred: float,
-    learning_rate: float,
-) -> float:
-    """Predict a single sample using trained trees."""
-    pred = initial_pred
-    for splits, leaves in trees:
-        node_id = 0
-        while node_id in splits:
-            split = splits[node_id]
-            if features[split.feature_idx] <= split.threshold:
-                node_id = split.left_child_id
-            else:
-                node_id = split.right_child_id
-        if node_id in leaves:
-            pred += learning_rate * leaves[node_id].value
-    return pred
+    aggregator.finish_round()
 
 
 def test_xgboost_heart_disease_shamir(heart_disease_df: pd.DataFrame):
@@ -189,61 +119,47 @@ def test_xgboost_heart_disease_shamir(heart_disease_df: pd.DataFrame):
 
     threshold = 2
     min_clients = 10
+    learning_rate = 0.15
+    lambda_reg = 2.0
 
     shareholders = [
         ShareHolder(party_id=i, x_coord=i + 1, min_clients=min_clients)
         for i in range(3)
     ]
-    aggregator = Aggregator(shareholders, n_bins=10, threshold=threshold, min_clients=min_clients)
+    aggregator = Aggregator(
+        shareholders,
+        n_bins=10,
+        threshold=threshold,
+        min_clients=min_clients,
+        learning_rate=learning_rate,
+        lambda_reg=lambda_reg,
+    )
 
     train_clients = create_clients(
         df_train, FEATURES, shareholders, threshold=threshold
     )
 
-    bins, initial_pred = compute_initial_statistics(
-        train_clients, aggregator, round_id=0
-    )
+    bins, initial_pred = compute_initial_statistics(train_clients, aggregator)
 
     print(f"Number of training clients: {aggregator.n_clients}")
     print(f"Initial prediction (target mean): {initial_pred:.4f}")
 
-    for client in train_clients:
-        client.prediction = initial_pred
-
     n_trees = 15
     max_depth = 3
-    learning_rate = 0.15
-    lambda_reg = 2.0
 
-    all_trees = []
-    for tree_idx in range(n_trees):
-        base_round_id = 1000 + tree_idx * 100
-
-        splits, leaves = train_tree(
+    for round_id in range(n_trees):
+        train_tree(
             train_clients,
             aggregator,
             bins,
             max_depth,
-            lambda_reg,
-            learning_rate,
-            base_round_id,
+            round_id,
         )
-        all_trees.append((splits, leaves))
-
-        for sh in shareholders:
-            for rid in range(base_round_id, base_round_id + max_depth + 2):
-                sh.clear_round(rid)
 
     test_features_arr = df_test[FEATURES].values.astype(float)
     test_targets = df_test["target"].values
 
-    test_preds = []
-    for i in range(len(test_targets)):
-        features = list(test_features_arr[i])
-        pred = predict_sample(features, all_trees, initial_pred, learning_rate)
-        test_preds.append(pred)
-
-    test_preds = np.array(test_preds)
+    test_preds = aggregator.model.predict(test_features_arr)
     test_classes = (test_preds >= 0.5).astype(int)
     test_accuracy = np.mean(test_classes == test_targets)
 
@@ -264,9 +180,9 @@ def test_min_clients_enforcement():
     ]
 
     for client in clients:
-        client.submit_stats(round_id=0)
+        client.submit_stats()
 
-    commitments = list(shareholders[0].get_commitments(round_id=0, round_type="stats"))
+    commitments = list(shareholders[0].get_stats_commitments())
 
     with pytest.raises(ValueError, match="minimum"):
-        shareholders[0].get_stats_sum(round_id=0, commitments=commitments)
+        shareholders[0].get_stats_sum(commitments=commitments)

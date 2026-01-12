@@ -5,7 +5,7 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 
 from .crypto import Share
-from .messages import CommittedGradientShare, CommittedStatsShare, RoundType
+from .messages import CommittedGradientShare, CommittedStatsShare
 
 
 class ShareHolder:
@@ -21,44 +21,56 @@ class ShareHolder:
         self.x_coord = x_coord
         self.min_clients = min_clients
 
-        self._stats: Dict[int, Dict[bytes, Share]] = {}
-        self._gradients: Dict[int, Dict[bytes, Dict[int, Share]]] = {}
+        self._stats: Dict[bytes, Share] = {}
+        # Key: (round_id, depth) -> commitment -> node_id -> Share
+        self._gradients: Dict[Tuple[int, int], Dict[bytes, Dict[int, Share]]] = {}
+        self._current_round_id: int = -1
 
     def receive_stats(self, msg: CommittedStatsShare) -> None:
         """Receive and store stats share from a client."""
-        if msg.round_id not in self._stats:
-            self._stats[msg.round_id] = {}
-        self._stats[msg.round_id][msg.commitment] = msg.share
+        self._stats[msg.commitment] = msg.share
 
     def receive_gradients(self, msg: CommittedGradientShare) -> None:
         """Receive and store gradient share from a client."""
-        if msg.round_id not in self._gradients:
-            self._gradients[msg.round_id] = {}
-        if msg.commitment not in self._gradients[msg.round_id]:
-            self._gradients[msg.round_id][msg.commitment] = {}
-        self._gradients[msg.round_id][msg.commitment][msg.node_id] = msg.share
+        if msg.round_id > self._current_round_id:
+            # New round started - clear previous round's data
+            self._gradients.clear()
+            self._current_round_id = msg.round_id
 
-    def get_commitments(self, round_id: int, round_type: RoundType = "stats") -> Set[bytes]:
-        """Get set of commitments received for a round."""
-        if round_type == "stats":
-            return set(self._stats.get(round_id, {}).keys())
-        else:
-            return set(self._gradients.get(round_id, {}).keys())
+        key = (msg.round_id, msg.depth)
+        if key not in self._gradients:
+            self._gradients[key] = {}
+        if msg.commitment not in self._gradients[key]:
+            self._gradients[key][msg.commitment] = {}
+        self._gradients[key][msg.commitment][msg.node_id] = msg.share
 
-    def get_stats_sum(
-        self, round_id: int, commitments: List[bytes]
-    ) -> Tuple[int, np.ndarray]:
+    def get_stats_commitments(self) -> Set[bytes]:
+        """Get set of commitments received for stats."""
+        return set(self._stats.keys())
+
+    def get_gradient_commitments(self, round_id: int, depth: int) -> Set[bytes]:
+        """Get set of commitments received for a gradient round."""
+        return set(self._gradients.get((round_id, depth), {}).keys())
+
+    def get_gradient_node_ids(self, round_id: int, depth: int) -> Set[int]:
+        """Get set of node_ids that have gradient data for a round/depth."""
+        round_data = self._gradients.get((round_id, depth), {})
+        node_ids: Set[int] = set()
+        for client_nodes in round_data.values():
+            node_ids.update(client_nodes.keys())
+        return node_ids
+
+    def get_stats_sum(self, commitments: List[bytes]) -> Tuple[int, np.ndarray]:
         """Sum stats shares for requested commitments."""
         if len(commitments) < self.min_clients:
             raise ValueError(
                 f"Requested {len(commitments)} clients, minimum is {self.min_clients}"
             )
 
-        round_data = self._stats.get(round_id, {})
         total_y = None
 
         for commitment in commitments:
-            s = round_data.get(commitment)
+            s = self._stats.get(commitment)
             if s is None:
                 raise ValueError(f"Unknown commitment: {commitment.hex()[:16]}...")
 
@@ -73,7 +85,7 @@ class ShareHolder:
         return (self.x_coord, total_y)
 
     def get_gradients_sum(
-        self, round_id: int, commitments: List[bytes], node_id: int
+        self, round_id: int, depth: int, commitments: List[bytes], node_id: int
     ) -> Tuple[int, np.ndarray]:
         """Sum gradient shares for requested commitments and node."""
         if len(commitments) < self.min_clients:
@@ -81,7 +93,7 @@ class ShareHolder:
                 f"Requested {len(commitments)} clients, minimum is {self.min_clients}"
             )
 
-        round_data = self._gradients.get(round_id, {})
+        round_data = self._gradients.get((round_id, depth), {})
         total_y = None
 
         for commitment in commitments:
@@ -98,11 +110,6 @@ class ShareHolder:
             raise ValueError(f"No shares for node {node_id}")
 
         return (self.x_coord, total_y)
-
-    def clear_round(self, round_id: int) -> None:
-        """Clear data for a completed round."""
-        self._stats.pop(round_id, None)
-        self._gradients.pop(round_id, None)
 
     def reset(self) -> None:
         """Clear all accumulated data."""
