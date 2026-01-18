@@ -165,14 +165,14 @@ The aggregator learns split thresholds (necessary for prediction) and gradient s
 
 == Setup
 
-We evaluate on three UCI medical datasets:
+We evaluate on three datasets from the UCI Machine Learning Repository @uci2019:
 
 #table(
   columns: (auto, auto, auto, auto),
   [*Dataset*], [*Samples*], [*Features*], [*Task*],
-  [Heart Disease], [297], [13], [Binary classification],
-  [Breast Cancer Wisconsin], [569], [30], [Binary classification],
-  [Pima Indians Diabetes], [768], [8], [Binary classification],
+  [Heart Disease @detrano1989], [297], [13], [Binary classification],
+  [Breast Cancer @street1993], [569], [30], [Binary classification],
+  [Pima Diabetes @smith1988], [768], [8], [Binary classification],
 )
 
 Configuration: 2-of-3 Shamir threshold, 10 bins per feature (equal-width from aggregated statistics), max depth 3, 15 trees. Baseline: XGBoost with matched hyperparameters.
