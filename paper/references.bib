@@ -1,3 +1,47 @@
+% Federated Learning - Foundations
+@inproceedings{mcmahan2017,
+  title={Communication-efficient learning of deep networks from decentralized data},
+  author={McMahan, Brendan and Moore, Eider and Ramage, Daniel and Hampson, Seth and y Arcas, Blaise Aguera},
+  booktitle={Artificial Intelligence and Statistics},
+  pages={1273--1282},
+  year={2017},
+  organization={PMLR}
+}
+
+@article{kairouz2021,
+  title={Advances and open problems in federated learning},
+  author={Kairouz, Peter and McMahan, H Brendan and Avent, Brendan and Bellet, Aur{\'e}lien and Bennis, Mehdi and Bhagoji, Arjun Nitin and Bonawitz, Kallista and others},
+  journal={Foundations and Trends in Machine Learning},
+  volume={14},
+  number={1--2},
+  pages={1--210},
+  year={2021}
+}
+
+% Medical Federated Learning
+@article{rieke2020,
+  title={The future of digital health with federated learning},
+  author={Rieke, Nicola and Hancox, Jonny and Li, Wenqi and Milletari, Fausto and Roth, Holger R and Albarqouni, Shadi and Bakas, Spyridon and others},
+  journal={NPJ Digital Medicine},
+  volume={3},
+  number={1},
+  pages={1--7},
+  year={2020},
+  publisher={Nature Publishing Group}
+}
+
+@article{sheller2020,
+  title={Federated learning in medicine: facilitating multi-institutional collaborations without sharing patient data},
+  author={Sheller, Micah J and Edwards, Brandon and Reina, G Anthony and Martin, Jason and Pati, Sarthak and Kotrotsou, Aikaterini and Milchenko, Mikhail and others},
+  journal={Scientific Reports},
+  volume={10},
+  number={1},
+  pages={12598},
+  year={2020},
+  publisher={Nature Publishing Group}
+}
+
+% Secure Aggregation
 @inproceedings{bonawitz2017,
   title={Practical secure aggregation for privacy-preserving machine learning},
   author={Bonawitz, Keith and Ivanov, Vladimir and Kreuter, Ben and Marcedone, Antonio and McMahan, H Brendan and Patel, Sarvar and Ramage, Daniel and Segal, Aaron and Seth, Karn},
@@ -6,26 +50,15 @@
   year={2017}
 }
 
-@inproceedings{mcmahan2017,
-  title={Communication-efficient learning of deep networks from decentralized data},
-  author={McMahan, Brendan and Moore, Eider and Ramage, Daniel and Hampson, Seth and y Arcas, Blaise Aguera},
-  booktitle={Artificial intelligence and statistics},
-  pages={1273--1282},
-  year={2017},
-  organization={PMLR}
+@inproceedings{bell2020,
+  title={Secure single-server aggregation with (poly) logarithmic overhead},
+  author={Bell, James Henry and Bonawitz, Kallista A and Gasc{\'o}n, Adri{\`a} and Lepoint, Tancr{\`e}de and Raykova, Mariana},
+  booktitle={Proceedings of the 2020 ACM SIGSAC Conference on Computer and Communications Security},
+  pages={1253--1269},
+  year={2020}
 }
 
-@article{cheng2021,
-  title={Secureboost: A lossless federated learning framework},
-  author={Cheng, Kewei and Fan, Tao and Jin, Yilun and Liu, Yang and Chen, Tianjian and Papadopoulos, Dimitrios and Yang, Qiang},
-  journal={IEEE Intelligent Systems},
-  volume={36},
-  number={6},
-  pages={87--98},
-  year={2021},
-  publisher={IEEE}
-}
-
+% Secret Sharing and MPC
 @article{shamir1979,
   title={How to share a secret},
   author={Shamir, Adi},
@@ -37,6 +70,55 @@
   publisher={ACM}
 }
 
+@inproceedings{benor1988,
+  title={Completeness theorems for non-cryptographic fault-tolerant distributed computation},
+  author={Ben-Or, Michael and Goldwasser, Shafi and Wigderson, Avi},
+  booktitle={Proceedings of the Twentieth Annual ACM Symposium on Theory of Computing},
+  pages={1--10},
+  year={1988}
+}
+
+@article{gennaro1998,
+  title={Simplified VSS and fast-track multiparty computations with applications to threshold cryptography},
+  author={Gennaro, Rosario and Rabin, Michael O and Rabin, Tal},
+  journal={Proceedings of the Seventeenth Annual ACM Symposium on Principles of Distributed Computing},
+  pages={101--111},
+  year={1998}
+}
+
+% Federated Gradient Boosting
+@article{cheng2021,
+  title={Secureboost: A lossless federated learning framework},
+  author={Cheng, Kewei and Fan, Tao and Jin, Yilun and Liu, Yang and Chen, Tianjian and Papadopoulos, Dimitrios and Yang, Qiang},
+  journal={IEEE Intelligent Systems},
+  volume={36},
+  number={6},
+  pages={87--98},
+  year={2021},
+  publisher={IEEE}
+}
+
+@article{li2020ppgbdt,
+  title={Privacy-preserving gradient boosting decision trees},
+  author={Li, Qinbin and Wu, Zhaomin and Wen, Zeyi and He, Bingsheng},
+  journal={Proceedings of the AAAI Conference on Artificial Intelligence},
+  volume={34},
+  number={01},
+  pages={784--791},
+  year={2020}
+}
+
+@inproceedings{liu2020fedforest,
+  title={Federated forest},
+  author={Liu, Yang and Liu, Yingting and Liu, Zhijie and Liang, Yuxing and Meng, Chuishi and Zhang, Junbo and Zheng, Yu},
+  booktitle={IEEE Transactions on Big Data},
+  volume={8},
+  number={3},
+  pages={843--854},
+  year={2020}
+}
+
+% XGBoost
 @inproceedings{chen2016,
   title={XGBoost: A scalable tree boosting system},
   author={Chen, Tianqi and Guestrin, Carlos},
@@ -45,12 +127,69 @@
   year={2016}
 }
 
-@article{li2020,
-  title={Privacy-preserving gradient boosting decision trees},
-  author={Li, Qinbin and Wu, Zhaomin and Wen, Zeyi and He, Bingsheng},
-  journal={Proceedings of the AAAI Conference on Artificial Intelligence},
-  volume={34},
-  number={01},
-  pages={784--791},
-  year={2020}
+@article{friedman2001,
+  title={Greedy function approximation: a gradient boosting machine},
+  author={Friedman, Jerome H},
+  journal={Annals of Statistics},
+  pages={1189--1232},
+  year={2001},
+  publisher={JSTOR}
+}
+
+% Differential Privacy
+@article{dwork2014,
+  title={The algorithmic foundations of differential privacy},
+  author={Dwork, Cynthia and Roth, Aaron},
+  journal={Foundations and Trends in Theoretical Computer Science},
+  volume={9},
+  number={3--4},
+  pages={211--407},
+  year={2014}
+}
+
+@inproceedings{abadi2016,
+  title={Deep learning with differential privacy},
+  author={Abadi, Martin and Chu, Andy and Goodfellow, Ian and McMahan, H Brendan and Mironov, Ilya and Talwar, Kunal and Zhang, Li},
+  booktitle={Proceedings of the 2016 ACM SIGSAC Conference on Computer and Communications Security},
+  pages={308--318},
+  year={2016}
+}
+
+% Homomorphic Encryption (for comparison)
+@article{aono2017,
+  title={Privacy-preserving deep learning via additively homomorphic encryption},
+  author={Aono, Yoshinori and Hayashi, Takuya and Wang, Lihua and Moriai, Shiho and others},
+  journal={IEEE Transactions on Information Forensics and Security},
+  volume={13},
+  number={5},
+  pages={1333--1345},
+  year={2017}
+}
+
+% Cross-device FL
+@inproceedings{hard2018,
+  title={Federated learning for mobile keyboard prediction},
+  author={Hard, Andrew and Rao, Kanishka and Mathews, Rajiv and Ramaswamy, Swaroop and Beaufays, Fran{\c{c}}oise and Augenstein, Sean and Eichner, Hubert and Kiddon, Chlo{\'e} and Ramage, Daniel},
+  booktitle={arXiv preprint arXiv:1811.03604},
+  year={2018}
+}
+
+% K-anonymity
+@article{sweeney2002,
+  title={k-anonymity: A model for protecting privacy},
+  author={Sweeney, Latanya},
+  journal={International Journal of Uncertainty, Fuzziness and Knowledge-Based Systems},
+  volume={10},
+  number={05},
+  pages={557--570},
+  year={2002}
+}
+
+% Histogram-based gradient boosting
+@inproceedings{ke2017,
+  title={LightGBM: A highly efficient gradient boosting decision tree},
+  author={Ke, Guolin and Meng, Qi and Finley, Thomas and Wang, Taifeng and Chen, Wei and Ma, Weidong and Ye, Qiwei and Liu, Tie-Yan},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={30},
+  year={2017}
 }
