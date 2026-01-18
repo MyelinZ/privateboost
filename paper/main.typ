@@ -165,13 +165,14 @@ The aggregator learns split thresholds (necessary for prediction) and gradient s
 
 == Setup
 
-We evaluate on two UCI medical datasets:
+We evaluate on three UCI medical datasets:
 
 #table(
   columns: (auto, auto, auto, auto),
   [*Dataset*], [*Samples*], [*Features*], [*Task*],
-  [Heart Disease], [237], [13], [Binary classification],
-  [Breast Cancer], [455], [30], [Binary classification],
+  [Heart Disease], [297], [13], [Binary classification],
+  [Breast Cancer Wisconsin], [569], [30], [Binary classification],
+  [Pima Indians Diabetes], [768], [8], [Binary classification],
 )
 
 Configuration: 2-of-3 Shamir threshold, 10 bins per feature (equal-width from aggregated statistics), max depth 3, 15 trees. Baseline: XGBoost with matched hyperparameters.
@@ -195,7 +196,17 @@ Configuration: 2-of-3 Shamir threshold, 10 bins per feature (equal-width from ag
 
 == Discussion
 
-The 98% gain retention demonstrates that histogram binning, not secret sharing, is the primary source of accuracy loss. Features with skewed distributions (e.g., `oldpeak`) show 90-93% retention, suggesting adaptive binning could improve results.
+#table(
+  columns: (auto, auto, auto),
+  [*Dataset*], [*privateboost*], [*XGBoost*],
+  [Heart Disease], [85.0%], [86.7%],
+  [Breast Cancer], [93.9%], [95.6%],
+  [Pima Diabetes], [72.7%], [71.4%],
+)
+
+Across all three datasets, privateboost achieves test accuracy within 2% of XGBoost with matched hyperparameters. On Pima Diabetes, privateboost slightly outperforms the baseline, likely due to the regularization effect of histogram binning on this smaller-feature dataset.
+
+The 98% gain retention demonstrates that histogram binning, not secret sharing, is the primary source of accuracy loss. Features with skewed distributions show 90-93% retention, suggesting adaptive binning could improve results.
 
 Dropout resilience emerges naturally from commitment-based aggregation: the aggregator works with whichever clients participate in each round.
 
