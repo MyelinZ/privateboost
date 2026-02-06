@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      background: white;
+      padding: 20px;
+      display: inline-block;
+    }
+
+    /* Proper fractions */
+    .frac {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      vertical-align: middle;
+      font-size: 8px;
+      line-height: 1.1;
+    }
+    .frac .num {
+      border-bottom: 1px solid #4B5563;
+      padding: 0 2px 1px;
+    }
+    .frac .den {
+      padding: 1px 2px 0;
+    }
+
+    .container {
+      display: flex;
+      gap: 20px;
+    }
+
+    /* Main diagram area */
+    .diagram {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 55px;
+      padding-right: 35px; /* Room for return arrow */
+    }
+
+    /* Tier rows */
+    .tier {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .tier-label {
+      width: 100px;
+      text-align: right;
+      padding-right: 12px;
+      border-right: 2px solid #E5E7EB;
+    }
+    .tier-label .name {
+      font-size: 11px;
+      font-weight: 600;
+      color: #374151;
+    }
+    .tier-label .desc {
+      font-size: 9px;
+      color: #6B7280;
+      margin-top: 2px;
+    }
+
+    .nodes {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    /* Node styling */
+    .node {
+      width: 44px;
+      height: 32px;
+      border: 2px solid;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      background: white;
+    }
+    .node.client {
+      border-color: #3B82F6;
+      color: #3B82F6;
+    }
+    .node.shareholder {
+      border-color: #10B981;
+      color: #10B981;
+    }
+    .node.aggregator {
+      border-color: #EF4444;
+      color: #EF4444;
+      width: 90px;
+    }
+
+    .ellipsis {
+      color: #9CA3AF;
+      font-size: 14px;
+      width: 20px;
+      text-align: center;
+    }
+
+    /* SVG overlay for arrows */
+    .arrows {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+    .arrow {
+      fill: none;
+      stroke: #9CA3AF;
+      stroke-width: 1.5;
+    }
+    .arrow.return {
+      stroke-dasharray: 5 3;
+    }
+    .arrowhead {
+      fill: #9CA3AF;
+    }
+
+    /* Arrow labels */
+    .arrow-label {
+      position: absolute;
+      font-size: 8px;
+      color: #6B7280;
+      background: white;
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+
+    /* Legend */
+    .legend {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-top: 15px;
+      padding-top: 10px;
+      border-top: 1px solid #E5E7EB;
+      font-size: 8px;
+      color: #6B7280;
+    }
+    .legend b {
+      color: #374151;
+    }
+
+    /* Annotation panel */
+    .annotations {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-left: 16px;
+      border-left: 1px solid #E5E7EB;
+      max-width: 190px;
+    }
+    .annotation {
+      background: #F9FAFB;
+      border: 1px solid #E5E7EB;
+      border-radius: 4px;
+      padding: 10px 12px;
+      font-size: 9px;
+      line-height: 1.5;
+      color: #4B5563;
+    }
+    .annotation .title {
+      font-weight: 600;
+      color: #1F2937;
+      margin-bottom: 4px;
+      font-size: 10px;
+    }
+    .annotation code {
+      background: #E5E7EB;
+      padding: 1px 4px;
+      border-radius: 2px;
+      font-family: "SF Mono", Monaco, monospace;
+      font-size: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="diagram" id="diagram">
+      <!-- Tier 1: Clients (many) -->
+      <div class="tier" id="clients-tier">
+        <div class="tier-label">
+          <div class="name">Clients</div>
+          <div class="desc">N total (N ≫ k)</div>
+        </div>
+        <div class="nodes" id="clients">
+          <div class="node client" id="c1">C₁</div>
+          <div class="node client" id="c2">C₂</div>
+          <div class="node client" id="c3">C₃</div>
+          <div class="ellipsis">···</div>
+          <div class="node client" id="cn">Cₙ</div>
+        </div>
+      </div>
+
+      <!-- Tier 2: Shareholders (few) -->
+      <div class="tier" id="shareholders-tier">
+        <div class="tier-label">
+          <div class="name">Shareholders</div>
+          <div class="desc">k total, m-of-k</div>
+        </div>
+        <div class="nodes" id="shareholders">
+          <div class="node shareholder" id="sh1">SH₁</div>
+          <div class="node shareholder" id="sh2">SH₂</div>
+          <div class="node shareholder" id="shk">SHₖ</div>
+        </div>
+      </div>
+
+      <!-- Tier 3: Aggregator -->
+      <div class="tier" id="aggregator-tier">
+        <div class="tier-label">
+          <div class="name">Aggregator</div>
+          <div class="desc">coordinates</div>
+        </div>
+        <div class="nodes" id="aggregator">
+          <div class="node aggregator" id="agg">Aggregator</div>
+        </div>
+      </div>
+
+      <!-- SVG arrows overlay -->
+      <svg class="arrows" id="arrows"></svg>
+
+      <!-- Arrow labels -->
+      <div class="arrow-label" style="top: 70px; left: 200px;">
+        shares of x, x² or g, h
+      </div>
+      <div class="arrow-label" style="top: 160px; left: 255px;">
+        Σ shares
+      </div>
+      <div class="arrow-label" style="top: 130px; right: 5px; font-size: 7px;">
+        bin edges, splits
+      </div>
+
+      <!-- Legend -->
+      <div class="legend">
+        <span><b>x</b> = feature value</span>
+        <span><b>g</b> = gradient</span>
+        <span><b>h</b> = hessian</span>
+      </div>
+    </div>
+
+    <!-- Right side annotations -->
+    <div class="annotations">
+      <div class="annotation">
+        <div class="title">Phase 1: Statistics</div>
+        Clients share <code>xᵢ</code>, <code>xᵢ²</code><br>
+        Aggregator computes:<br>
+        μ = <span class="frac"><span class="num">Σx</span><span class="den">N</span></span>,
+        σ² = <span class="frac"><span class="num">Σx²</span><span class="den">N</span></span> − μ²<br>
+        Bins: B edges over [μ−3σ, μ+3σ]
+      </div>
+      <div class="annotation">
+        <div class="title">Phase 2: Gradients</div>
+        Clients share <code>gᵢ</code>, <code>hᵢ</code> per bin<br>
+        Aggregator reconstructs ΣG, ΣH<br>
+        Finds best split, broadcasts decision
+      </div>
+      <div class="annotation">
+        <div class="title">Privacy</div>
+        • Shareholders see random shares<br>
+        • Aggregator sees only sums<br>
+        • No individual values revealed
+      </div>
+    </div>
+  </div>
+
+  <script>
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        drawArrows();
+      });
+    });
+
+    function drawArrows() {
+      const svg = document.getElementById('arrows');
+      const diagram = document.getElementById('diagram');
+      const diagramRect = diagram.getBoundingClientRect();
+
+      function getPos(id) {
+        const el = document.getElementById(id);
+        const rect = el.getBoundingClientRect();
+        return {
+          x: rect.left - diagramRect.left + rect.width / 2,
+          y: rect.top - diagramRect.top + rect.height / 2,
+          top: rect.top - diagramRect.top,
+          bottom: rect.top - diagramRect.top + rect.height,
+          left: rect.left - diagramRect.left,
+          right: rect.left - diagramRect.left + rect.width
+        };
+      }
+
+      const c1 = getPos('c1');
+      const sh1 = getPos('sh1');
+      const sh2 = getPos('sh2');
+      const shk = getPos('shk');
+      const agg = getPos('agg');
+
+      svg.innerHTML = `
+        <defs>
+          <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" class="arrowhead"/>
+          </marker>
+        </defs>
+      `;
+
+      // C1 → all shareholders (fan-out)
+      drawArrow(svg, c1.x, c1.bottom + 2, sh1.x, sh1.top - 2);
+      drawArrow(svg, c1.x, c1.bottom + 2, sh2.x, sh2.top - 2);
+      drawArrow(svg, c1.x, c1.bottom + 2, shk.x, shk.top - 2);
+
+      // Shareholders → Aggregator
+      drawArrow(svg, sh1.x, sh1.bottom + 2, agg.x - 15, agg.top - 2);
+      drawArrow(svg, sh2.x, sh2.bottom + 2, agg.x, agg.top - 2);
+      drawArrow(svg, shk.x, shk.bottom + 2, agg.x + 15, agg.top - 2);
+
+      // Return: Aggregator → Cn (broadcast, on right side)
+      const cn = getPos('cn');
+      drawReturnPath(svg, agg, cn);
+    }
+
+    function drawArrow(svg, x1, y1, x2, y2) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const midY = (y1 + y2) / 2;
+      path.setAttribute('d', `M ${x1} ${y1} Q ${x1} ${midY}, ${(x1+x2)/2} ${midY} T ${x2} ${y2}`);
+      path.setAttribute('class', 'arrow');
+      path.setAttribute('marker-end', 'url(#arrowhead)');
+      svg.appendChild(path);
+    }
+
+    function drawReturnPath(svg, from, toCn) {
+      // Draw on the RIGHT side: Aggregator → right → up → back to Cn
+      const rightX = toCn.right + 25;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      // Go right from aggregator, then up, then left to Cn
+      path.setAttribute('d', `M ${from.right + 2} ${from.y} L ${rightX} ${from.y} L ${rightX} ${toCn.y} L ${toCn.right + 2} ${toCn.y}`);
+      path.setAttribute('class', 'arrow return');
+      path.setAttribute('marker-end', 'url(#arrowhead)');
+      svg.appendChild(path);
+    }
+  </script>
+</body>
+</html>

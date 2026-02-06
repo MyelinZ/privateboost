@@ -1,15 +1,26 @@
 // Privacy-Preserving Federated XGBoost for Cross-Device Medical Applications
 // ArXiv preprint
 
+#import "@preview/abbr:0.3.0"
+#show: abbr.show-rule
+
+#abbr.make(
+  ("IID", "independent and identically distributed"),
+  ("MPC", "multi-party computation"),
+  ("SecAgg", "Secure Aggregation"),
+  ("UCI", "University of California, Irvine"),
+)
+
 #set document(
   title: "Privacy-Preserving Federated XGBoost for Cross-Device Medical Applications",
-  author: "Author Names",
+  author: "Bernhard Specht",
 )
 
 #set page(
   paper: "a4",
   margin: (x: 1.5cm, y: 2cm),
   columns: 2,
+  numbering: "1",
 )
 
 #set text(
@@ -36,7 +47,7 @@
 
       #text(size: 11pt)[
         Author Names \
-        #text(size: 9pt, style: "italic")[Institution]
+        #text(size: 9pt, style: "italic")[]
       ]
 
       #v(1em)
@@ -45,7 +56,7 @@
         #align(left)[
           #text(weight: "bold")[Abstract.]
           #text(size: 9pt)[
-            We present privateboost, a privacy-preserving federated XGBoost system for the extreme non-IID setting where each client holds exactly one data sample. This cross-device setting arises naturally in medical applications where each patient controls their own record. Our protocol uses m-of-n Shamir secret sharing with commitment-based anonymous aggregation: raw feature values never leave the client, shareholders see only secret shares, and the aggregator reconstructs only aggregate gradient sums. Unlike SecAgg-based approaches requiring client-to-client coordination for pairwise key agreement, our architecture uses a fixed set of stateless shareholders — clients communicate only with shareholders, never with each other. We evaluate on UCI medical datasets, demonstrating 98% split gain retention compared to centralized XGBoost with less than 2% accuracy degradation, while maintaining resilience to client dropout. We discuss extensions including differential privacy and k-anonymous tree structures.
+            We present _privateboost_, a privacy-preserving federated XGBoost system for the extreme non-@IID:lsf setting where each client holds exactly one data sample. This cross-device setting arises naturally in medical applications where each patient controls their own record. Our protocol uses m-of-n Shamir secret sharing with commitment-based anonymous aggregation: raw feature values never leave the client, shareholders see only secret shares, and the aggregator reconstructs only aggregate sums for statistics and gradients. Unlike #[@SecAgg:lsf]-based approaches requiring client-to-client coordination for pairwise key agreement, our architecture uses a fixed set of shareholders where clients communicate only with shareholders, never with each other. We evaluate on @UCI:lsf medical datasets, demonstrating 98% split gain retention with accuracy comparable to centralized XGBoost, while maintaining resilience to client dropout.
           ]
         ]
       ]
@@ -57,15 +68,15 @@
 
 = Introduction
 
-Federated learning enables machine learning on distributed data without centralizing raw samples @kairouz2021. However, most existing work assumes a _cross-silo_ setting where each client (typically an organization) holds multiple data samples and can perform local training @mcmahan2017.
+Federated learning enables machine learning on distributed data without centralizing raw samples @mcmahan2017. However, most existing work assumes a _cross-silo_ setting where each client (typically an organization) holds multiple data samples and can perform local training @kairouz2021. Popular frameworks such as Flower @beutel2020flower and NVIDIA FLARE @roth2022nvidia support both settings but are most commonly deployed in cross-silo scenarios.
 
-In medical settings, "federated learning" typically means hospitals or research institutions each manage patient cohorts @rieke2020 @sheller2020 — the institution remains a trusted aggregation point for its patients' data. True _cross-device_ medical federated learning — where individual patients control their own records without institutional intermediaries — remains largely unexplored. Cross-device settings have been studied for applications like mobile keyboard prediction @hard2018, but medical applications present unique challenges.
+In medical settings, "federated learning" typically means hospitals or research institutions each manage patient cohorts @rieke2020 @sheller2020, with the institution serving as a trusted aggregation point for its patients' data. True _cross-device_ medical federated learning, where individual patients control their own records without institutional intermediaries, remains largely unexplored. Cross-device settings have been studied for applications like mobile keyboard prediction @hard2018, but medical applications present unique challenges.
 
-This setting presents a fundamental challenge: _extreme non-IID data_ where each client holds exactly one sample. A patient participating in a federated study contributes their single health record. There are no local batches, no local gradients to average — each participant is a single data point.
+First, _extreme non-@IID:s data_: each client holds exactly one sample. A patient participating in a federated study contributes their single health record. There are no local batches, no local gradients to average; each participant is a single data point. Second, tree-based methods like XGBoost @chen2016 require global statistics (gradient histograms across all samples) to find optimal split points. Without local batches large enough for meaningful statistics or secure aggregation, clients cannot contribute to these histograms without revealing their individual values.
 
-Existing privacy-preserving approaches face practical barriers in this setting. Secure Aggregation (SecAgg) @bonawitz2017 requires client-to-client coordination for pairwise key agreement, which is problematic when clients are intermittently online mobile devices. Homomorphic encryption @aono2017 enables computation on encrypted data but introduces substantial computational overhead.
+Existing privacy-preserving approaches face practical barriers in this setting. @SecAgg:s @bonawitz2017 requires client-to-client coordination for pairwise key agreement, which is problematic when clients are intermittently online mobile devices. Homomorphic encryption @aono2017 enables computation on encrypted data but introduces substantial computational overhead.
 
-We present _privateboost_, a privacy-preserving federated XGBoost system designed for the one-sample-per-client setting. Our contributions:
+We present _privateboost_, a privacy-preserving federated XGBoost system designed for the one-sample-per-client setting:
 
 + A protocol using m-of-n Shamir secret sharing with commitment-based client anonymity
 + A three-party architecture (clients → shareholders → aggregator) requiring no client-to-client communication
@@ -78,23 +89,25 @@ We present _privateboost_, a privacy-preserving federated XGBoost system designe
 
 == Secure Aggregation
 
-Secure Aggregation (SecAgg) @bonawitz2017 enables a server to compute sums of client updates without learning individual values. The protocol uses pairwise masking: clients agree on random masks that cancel when summed. This requires $O(n)$ key agreements per client, and clients must coordinate to handle dropouts. Subsequent work has improved the communication complexity @bell2020, but the fundamental requirement for client coordination remains.
+@SecAgg:s @bonawitz2017 enables a server to compute sums of client updates without learning individual values. The protocol uses pairwise masking: each pair of clients agrees on a random mask via Diffie-Hellman key exchange, and these masks cancel when the server sums all contributions. This requires $O(n)$ pairwise key agreements per client and coordination to handle dropouts. Subsequent work has improved the communication complexity @bell2020, but the fundamental requirement for client-to-client coordination remains.
 
-In cross-device settings where clients are intermittently available mobile devices, this coordination is challenging. Our approach eliminates client-to-client communication entirely.
+Our approach uses a star topology where clients distribute shares to a fixed set of shareholders without any client-to-client communication. This is better suited to cross-device settings where clients are intermittently available.
 
 == Federated Gradient Boosting
 
-Gradient boosting @friedman2001 builds ensembles of weak learners, with XGBoost @chen2016 and LightGBM @ke2017 achieving state-of-the-art performance through histogram-based split finding.
+Gradient boosting @friedman2001 builds ensembles of weak learners. XGBoost @chen2016 and LightGBM @ke2017 are widely adopted implementations that use histogram-based split finding for efficiency.
 
-SecureBoost @cheng2021 addresses federated XGBoost in the _vertical_ federated learning setting, where different parties hold different features for the same samples. This assumes institutional participants with aligned datasets. Federated Forest @liu2020fedforest similarly targets cross-silo settings with multiple samples per participant.
+SecureBoost @cheng2021 addresses federated XGBoost in the _vertical_ federated learning setting, where different parties hold different features for the same samples. This assumes institutional participants with aligned datasets. Federated Forest @liu2020fedforest similarly targets cross-silo settings with multiple samples per participant. Recent work has extended secret sharing to vertical federated XGBoost @xie2022fedxgb, and FedTree @li2023fedtree provides a comprehensive system supporting both horizontal and vertical settings with configurable privacy techniques.
+
+For _horizontal_ federated learning, SimFL @li2020simfl uses locality-sensitive hashing (LSH) to share similarity information between parties. However, SimFL requires each party to hold many samples: each party builds trees using only its local instances, weighted by gradients from similar samples at other parties. This fundamentally precludes the one-sample-per-client setting. Additionally, LSH-based approaches have weaker privacy guarantees than cryptographic methods: parties learn which samples are similar across institutions, which could enable inference attacks on sensitive medical data.
 
 Federated tree learning has also been explored with differential privacy @li2020ppgbdt, but typically assumes clients hold multiple samples for local histogram computation.
 
-Our work addresses the orthogonal _horizontal_ federated setting with extreme non-IID: one sample per client.
+Our work addresses the orthogonal _horizontal_ federated setting with extreme non-@IID:s: one sample per client, providing information-theoretic security via secret sharing rather than the computational security of LSH-based approaches.
 
 == Secret Sharing in Machine Learning
 
-Shamir secret sharing @shamir1979 is a foundational primitive for secure multi-party computation @benor1988. Verifiable extensions @gennaro1998 enable detection of malicious behavior. These techniques have been applied in MPC frameworks for machine learning inference, but less explored for federated training.
+Shamir secret sharing @shamir1979 is a foundational primitive for @MPC @benor1988. Verifiable extensions @gennaro1998 enable detection of malicious behavior. These techniques have been applied in @MPC:s frameworks for machine learning inference, but less explored for federated training.
 
 The key property we exploit is _additive homomorphism_: the sum of shares equals shares of the sum, enabling aggregation without reconstruction of individual values.
 
@@ -102,36 +115,53 @@ The key property we exploit is _additive homomorphism_: the sum of shares equals
 
 = Protocol
 
+== Background: Histogram-Based Split Finding
+
+XGBoost @chen2016 builds decision trees by greedily selecting splits that maximize a gain function. For each node, the algorithm considers every feature and every possible split threshold. To make this tractable, histogram-based methods discretize continuous features into $B$ bins and compute gradient statistics per bin.
+
+Each sample $i$ contributes a gradient $g_i = partial L / partial hat(y)_i$ and Hessian $h_i = partial^2 L / partial hat(y)_i^2$ based on the current prediction $hat(y)_i$ and true label $y_i$. For a candidate split that partitions samples into left ($L$) and right ($R$) sets, the gain is:
+
+$ "Gain" = 1/2 [ G_L^2 / (H_L + lambda) + G_R^2 / (H_R + lambda) - (G_L + G_R)^2 / (H_L + H_R + lambda) ] $
+
+where $G_L = sum_(i in L) g_i$, $H_L = sum_(i in L) h_i$, and $lambda$ is a regularization parameter. The key insight is that split finding requires only _aggregate_ gradient sums per bin, not individual gradients. Our protocol computes these sums without revealing individual contributions.
+
 == System Model
 
-We consider $n$ clients, each holding a single labeled sample $(x_i, y_i)$. A set of $k$ _shareholders_ (e.g., $k = 3$) act as intermediate aggregation points. A single _aggregator_ coordinates the training process.
+We consider $c$ clients, each holding a single labeled sample $(x_i, y_i)$. A set of $n$ _shareholders_ (e.g., $n = 3$) act as intermediate aggregation points. A single _aggregator_ coordinates the training process.
 
-#figure(
-  image("figures/architecture.png", width: 100%),
-  caption: [System architecture. Clients distribute Shamir shares to shareholders, who sum shares and forward to the aggregator for reconstruction.]
-)
+#place(top, float: true, scope: "parent")[
+  #figure(
+    image("figures/architecture.png", width: 90%),
+    caption: [System architecture. Clients distribute Shamir shares to all shareholders. Shareholders sum received shares and forward partial sums to the aggregator, which reconstructs aggregate statistics (Σx, Σx² for binning) and gradient sums (ΣG, ΣH for splits). The aggregator broadcasts bin configurations and split decisions back to clients.]
+  )
+]
 
-*Trust model:* We assume honest-but-curious parties. Shareholders do not collude (or at most $m-1$ collude for $m$-of-$k$ threshold). The aggregator follows the protocol but attempts to learn individual values from aggregates.
+We assume honest-but-curious parties. Shareholders do not collude (or at most $m-1$ collude for $m$-of-$n$ threshold). The aggregator follows the protocol but may attempt to learn individual values from aggregates.
 
 == Building Blocks
 
-*Shamir Secret Sharing.* To share a value $s$, sample a random polynomial $f(x)$ of degree $m-1$ with $f(0) = s$. Distribute shares $(i, f(i))$ for $i = 1, ..., k$. Any $m$ shares can reconstruct $s$ via Lagrange interpolation; fewer than $m$ shares reveal nothing.
+*Shamir Secret Sharing.* To share a secret value $s$, sample a random polynomial $f(x)$ of degree $m-1$ with $f(0) = s$. Distribute shares $(i, f(i))$ for $i = 1, ..., n$ to $n$ shareholders. Any $m$ shares can reconstruct $s$ via Lagrange interpolation; fewer than $m$ shares reveal nothing about $s$.
 
-*Additive Homomorphism.* For shares of values $a$ and $b$, the sum of shares equals shares of $(a + b)$. Shareholders can sum their received shares without learning individual values.
+*Additive Homomorphism.* For shares of values $a$ and $b$, the sum of shares equals shares of $(a + b)$. This allows shareholders to sum their received shares without learning individual values, and the aggregator reconstructs only the sum.
 
-*Commitments.* Each client generates a commitment $c = H("round" || "client_id" || "nonce")$ using a fresh nonce per round. The aggregator sees commitments but cannot link them to client identities or across rounds.
+*Commitments.* Each client generates a commitment $c = H("round" || "client_id" || "nonce")$ using a fresh nonce per round. Shareholders only sum shares that have matching commitment hashes, ensuring consistent aggregation: if a client's share reaches some shareholders but not others, those shares are excluded rather than causing corrupted reconstruction. The aggregator sees only commitment hashes, not client identifiers.
 
-== Protocol Phases
+== Protocol Flow
 
-*Phase 1: Statistics.* Clients secret-share their feature values $x$ and squared values $x^2$ with commitments. The aggregator reconstructs sums to compute per-feature mean and variance, then defines histogram bin edges.
+The protocol has two phases: a one-time statistics phase to define histogram bins, followed by repeated gradient phases to build trees.
 
-*Phase 2: Gradient Rounds.* For each tree and depth level:
-- Clients compute gradients $(g_i, h_i)$ based on current predictions
-- Clients secret-share gradients with fresh commitments per bin
-- Shareholders sum shares for each (feature, bin) combination
-- Aggregator reconstructs gradient sums and finds optimal splits
+*Phase 1: Statistics.* Before training, the aggregator needs feature statistics to define histogram bin edges. Each client $i$ creates Shamir shares of their feature values $x_(i,f)$ and squared values $x_(i,f)^2$ for each feature $f$, along with a commitment. Clients send shares to shareholders. The aggregator requests sums from shareholders, reconstructs $sum x$ and $sum x^2$, computes per-feature mean $mu$ and variance $sigma^2$, and defines $B$ equal-width bins spanning $mu plus.minus 3sigma$. The aggregator broadcasts bin edges to all clients.
 
-*Phase 3: Tree Completion.* The aggregator broadcasts split decisions. Clients update their node assignments and predictions. The tree is added to the ensemble.
+*Phase 2: Gradient Rounds.* For each tree and each depth level, the aggregator needs gradient sums per (feature, bin) combination. Each client $i$:
+
++ Computes their gradient $g_i$ and Hessian $h_i$ from current ensemble prediction
++ For each feature $f$, determines which bin $b$ their value $x_(i,f)$ falls into
++ Creates Shamir shares of $(g_i, h_i)$ with a fresh commitment
++ Sends shares to shareholders, tagged with $(f, b, "commitment")$
+
+Shareholders accumulate shares grouped by (feature, bin, commitment). When the aggregator requests sums for a set of commitments, each shareholder returns summed shares per (feature, bin). The aggregator reconstructs gradient sums $G_(f,b) = sum g_i$ and $H_(f,b) = sum h_i$ for each bin, evaluates the gain formula for each possible split, selects the best split, and broadcasts the decision (feature, threshold) to clients. Clients update their node assignments, and the process repeats for the next depth level.
+
+After reaching maximum depth, leaf values are computed from gradient sums and the tree is added to the ensemble. The entire gradient phase repeats for each tree.
 
 #v(1em)
 
@@ -139,76 +169,58 @@ We consider $n$ clients, each holding a single labeled sample $(x_i, y_i)$. A se
 
 == Privacy Guarantees
 
-#table(
-  columns: (auto, auto, auto),
-  [*Party*], [*Observes*], [*Learns*],
-  [Client], [Own raw data], [Nothing new],
-  [Shareholder], [Shares + commitments], [Nothing (threshold not met)],
-  [Aggregator], [Sums + commitment hashes], [Aggregate statistics only],
-)
+*Clients* hold their raw feature values and labels locally. Each client submits Shamir shares along with a pseudonymous client identifier (to prevent duplicate submissions) to shareholders. This identifier is linked to an account but does not reveal the client's real identity. Since shares are information-theoretically secure, no single shareholder can learn anything about the original values.
 
-The aggregator learns split thresholds (necessary for prediction) and gradient sums per bin. It learns _how many_ clients fall into each tree branch but not _which_ clients.
+*Shareholders* receive shares tagged with client identifiers and commitment hashes. They use identifiers to prevent duplicate submissions but do not forward them to the aggregator. Shareholders cannot reconstruct values without colluding with at least $m-1$ other shareholders. The collusion threshold is configurable: with m-of-n sharing, at least m shareholders must collude to reconstruct individual values. Increasing from 2-of-3 to 3-of-5 or higher provides stronger guarantees while maintaining dropout tolerance. Shareholders sum shares for requested commitments and return only these aggregated sums.
+
+*The aggregator* receives summed shares from shareholders and reconstructs aggregate gradient sums via Lagrange interpolation. Crucially, it never sees client identifiers, only opaque commitment hashes. It learns split thresholds (necessary for prediction) and gradient sums per bin. It learns how many clients fall into each tree branch but not which specific clients.
 
 == Limitations
 
-*Collusion threshold.* With 2-of-3 sharing, any two colluding shareholders can reconstruct individual values. Deployments should distribute shareholders across independent parties.
+*Branch counts.* The aggregator learns client counts per tree branch. For branches with very few clients, this narrows the anonymity set. Combined with auxiliary information, this could enable inference attacks. This motivates k-anonymous tree constraints (Section 6.2).
 
-*Branch counts.* The aggregator learns client counts per tree branch. For branches with very few clients, this narrows the anonymity set. Combined with auxiliary information, this could enable inference attacks. This motivates k-anonymous tree constraints (Section 6).
+*Shareholder path visibility.* Shareholders observe which bin each client submits gradients to, revealing individual tree paths. This can be addressed using the path hiding technique described in Section 6.3: clients submit shares for all possible paths, with only the true path containing non-zero values. However, this incurs communication overhead that grows exponentially with tree depth ($O(2^d)$ per client per round).
 
 *No differential privacy.* The protocol reveals exact aggregate sums. Future work addresses formal differential privacy guarantees.
 
-*Malicious clients.* The protocol assumes honest-but-curious clients. In practice, mobile deployments can leverage platform attestation mechanisms — such as App Check tokens on Android and App Attest on iOS — to verify that participating clients are running legitimate, unmodified application code. This provides a practical defense against Sybil attacks and gradient poisoning without requiring cryptographic verification of individual contributions.
+*Malicious clients.* The protocol assumes honest-but-curious clients. In practice, mobile deployments can leverage platform attestation mechanisms (such as App Check tokens on Android and App Attest on iOS) to verify that participating clients are running legitimate, unmodified application code. This provides a practical defense against Sybil attacks and gradient poisoning without requiring cryptographic verification of individual contributions.
+
+*Single aggregator.* The current design assumes a single honest-but-curious aggregator. A malicious aggregator could corrupt split decisions or model outputs. This can be mitigated by running multiple independent aggregators that reconstruct the same values and cross-verify results, or by using verifiable computation techniques.
 
 #v(1em)
 
 = Experiments
 
-== Setup
+We evaluate on three medical datasets from the @UCI:s Machine Learning Repository @uci2019. Heart Disease @detrano1989 (297 samples) predicts coronary artery disease from 13 clinical features. Breast Cancer @street1993 (569 samples) classifies tumors using 30 cell nuclei measurements. Pima Diabetes @smith1988 (768 samples) predicts diabetes onset from 8 diagnostic measurements. We use an 80/20 train/test split for all datasets.
 
-We evaluate on three datasets from the UCI Machine Learning Repository @uci2019:
-
-#table(
-  columns: (auto, auto, auto, auto),
-  [*Dataset*], [*Samples*], [*Features*], [*Task*],
-  [Heart Disease @detrano1989], [297], [13], [Binary classification],
-  [Breast Cancer @street1993], [569], [30], [Binary classification],
-  [Pima Diabetes @smith1988], [768], [8], [Binary classification],
-)
-
-Configuration: 2-of-3 Shamir threshold, 10 bins per feature (equal-width from aggregated statistics), max depth 3, 15 trees. Baseline: XGBoost with matched hyperparameters.
-
-== Results
-
-#figure(
-  image("figures/gain_retention.png", width: 100%),
-  caption: [Split gain retention per feature. Mean retention 98% across features.]
-)
+We use 2-of-3 Shamir threshold, 10 bins per feature, max depth 3, 15 trees, learning rate 0.15, and regularization $lambda = 2.0$. Bins are equal-width, spanning $mu plus.minus 3 sigma$ computed from aggregated statistics. We compare against XGBoost with matched hyperparameters and XGBoost with default settings.
 
 #figure(
   image("figures/learning_curves.png", width: 100%),
-  caption: [Learning curves comparing privateboost to XGBoost. Final accuracy gap less than 2%.]
+  caption: [Learning curves comparing _privateboost_ to XGBoost across three medical datasets.],
+  placement: auto,
+  scope: "parent"
 )
+
+Across all three datasets, _privateboost_ achieves competitive test accuracy. On Heart Disease, _privateboost_ achieves 88.3% compared to 83.3% for XGBoost with matched hyperparameters and 76.7% for XGBoost with defaults. On Breast Cancer, all three methods achieve 95.6% accuracy. On Pima Diabetes, _privateboost_ achieves 71.4% compared to 73.4% for both XGBoost configurations.
+
+The Heart Disease result is notable: _privateboost_ outperforms both XGBoost configurations, which we attribute to a regularization effect from histogram binning that reduces overfitting on smaller datasets.
+
+#figure(
+  image("figures/gain_retention.png", width: 100%),
+  caption: [Split gain retention per feature on Heart Disease. Mean retention 98% across features.]
+)
+
+Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in few bins. On Heart Disease, this explains the 90-93% gain retention observed on features like `oldpeak`. Quantile-based binning via federated sketching could address this, though it would require additional protocol rounds.
+
+In cross-device settings, clients are intermittently available: mobile devices go offline, patients miss check-ins, or network connectivity fails. The protocol must tolerate such dropout without requiring all clients to participate in every round.
 
 #figure(
   image("figures/dropout_resilience.png", width: 100%),
-  caption: [Test accuracy under varying client dropout rates. Stable up to ~30% dropout.]
+  caption: [Test accuracy under varying client dropout rates.]
 )
 
-== Discussion
-
-#table(
-  columns: (auto, auto, auto),
-  [*Dataset*], [*privateboost*], [*XGBoost*],
-  [Heart Disease], [85.0%], [86.7%],
-  [Breast Cancer], [93.9%], [95.6%],
-  [Pima Diabetes], [72.7%], [71.4%],
-)
-
-Across all three datasets, privateboost achieves test accuracy within 2% of XGBoost with matched hyperparameters. On Pima Diabetes, privateboost slightly outperforms the baseline, likely due to the regularization effect of histogram binning on this smaller-feature dataset.
-
-The 98% gain retention demonstrates that histogram binning, not secret sharing, is the primary source of accuracy loss. Features with skewed distributions show 90-93% retention, suggesting adaptive binning could improve results.
-
-Dropout resilience emerges naturally from commitment-based aggregation: the aggregator works with whichever clients participate in each round.
+The protocol naturally handles dropout: the aggregator reconstructs from whichever clients participate in each round. We simulate dropout by randomly excluding a fraction of clients each training round, with independent sampling per round. Accuracy remains stable up to 80% dropout across all datasets, demonstrating robustness to intermittent client availability.
 
 #v(1em)
 
@@ -216,7 +228,7 @@ Dropout resilience emerges naturally from commitment-based aggregation: the aggr
 
 == Differential Privacy
 
-Adding calibrated Laplace noise to gradient sums before reconstruction would provide formal $(epsilon, delta)$-differential privacy @dwork2014. Similar techniques have been applied to deep learning @abadi2016. The noise scale can be calibrated using the mean and variance statistics already computed during the binning phase — no additional privacy cost for calibration. We suggest per-tree budgets of $epsilon = 1.0 - 2.0$ with composition accounting across the ensemble.
+Adding calibrated Laplace noise to gradient sums before reconstruction would provide formal $(epsilon, delta)$-differential privacy @dwork2014. Similar techniques have been applied to deep learning @abadi2016. The noise scale can be calibrated using the mean and variance statistics already computed during the binning phase, incurring no additional privacy cost. We suggest per-tree budgets of $epsilon = 1.0 - 2.0$ with composition accounting across the ensemble.
 
 == K-Anonymous Tree Structure
 
@@ -226,29 +238,22 @@ To prevent membership inference via branch analysis, splits could be constrained
 
 In the current protocol, the aggregator learns how many clients traverse each branch of the tree, even though it cannot identify which specific clients. This branch count information could narrow the anonymity set, particularly for branches with few clients.
 
-A stronger privacy guarantee would hide even the branch membership. We sketch an extension using Shamir secret sharing for path indicators.
+A stronger privacy guarantee would hide even the branch membership. At each tree depth, clients secret-share a binary indicator for each active node: 1 if the client belongs to that node, 0 otherwise. Shareholders sum these indicators alongside the gradient shares. The aggregator reconstructs only the total count per node, learning nothing about individual assignments beyond what the count reveals.
 
-*Approach.* At each tree depth, clients secret-share a binary indicator for each active node: 1 if the client belongs to that node, 0 otherwise. Shareholders sum these indicators alongside the gradient shares. The aggregator reconstructs only the total count per node, learning nothing about individual assignments beyond what the count reveals.
+This extension incurs communication overhead of $O(2^d times n times c)$ shares per gradient round, where $d$ is tree depth, $n$ is shareholders, and $c$ is clients. For $d = 3$, $n = 3$, and $c = 200$:
 
-*Communication overhead.* Let $d$ be the tree depth, $k$ the number of shareholders, and $n$ the number of clients. At depth $d$, there are up to $2^d$ active nodes. Each client must share an indicator for each node, resulting in:
+- Current protocol: $200 times 3 = 600$ shares per round
+- With path hiding: $8 times 200 times 3 = 4,800$ shares per round
 
-$ O(2^d times k times n) "shares per gradient round" $
-
-For concrete parameters (depth $d = 3$, shareholders $k = 3$, clients $n = 200$):
-- Current protocol: $approx 200 times 3 = 600$ gradient shares per round
-- With path hiding: $approx 8 times 200 times 3 = 4,800$ shares per round
-
-This represents approximately 8× overhead at depth 3. The overhead grows exponentially with depth, making this extension most practical for shallow trees ($d <= 3$), which are common in gradient boosting where individual trees are intentionally weak learners.
-
-*Tradeoff.* Path hiding provides stronger privacy — the aggregator learns only aggregate branch counts through reconstruction, not through direct observation — at the cost of increased communication. For applications with stringent privacy requirements and moderate tree depths, this tradeoff may be acceptable.
+This 8× overhead grows exponentially with depth, making the extension most practical for shallow trees ($d <= 3$), which are common in gradient boosting. For applications with stringent privacy requirements, this tradeoff may be acceptable.
 
 #v(1em)
 
 = Conclusion
 
-We presented privateboost, a privacy-preserving federated XGBoost system for the extreme non-IID setting where each client holds exactly one sample. Our protocol ensures raw data never leaves the client, requires no client-to-client coordination, and provides resilience to participant dropout.
+We presented _privateboost_, a privacy-preserving federated XGBoost system for the extreme non-@IID:s setting where each client holds exactly one sample. Our protocol ensures raw data never leaves the client, requires no client-to-client coordination, and provides resilience to participant dropout.
 
-Evaluation on medical datasets demonstrates 98% split gain retention compared to centralized XGBoost with less than 2% accuracy degradation. The system enables true cross-device medical federated learning where patients can participate directly without institutional intermediaries.
+Evaluation on medical datasets demonstrates 98% split gain retention with accuracy comparable to centralized XGBoost. The system enables true cross-device medical federated learning where patients can participate directly without institutional intermediaries.
 
 #v(2em)
 

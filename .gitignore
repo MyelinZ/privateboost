@@ -11,3 +11,20 @@ wheels/
 
 # Generated docs
 *.pdf
+
+# IDE / editor
+.idea/
+
+# Claude Code local settings
+.claude/
+paper/.claude/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+
+# Node
+node_modules/

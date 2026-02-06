@@ -5,25 +5,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install dependencies (use uv)
+# Install dependencies (use uv, requires Python >=3.12)
 uv sync --all-extras
 
-# Run tests
-uv run pytest
+# Run tests (integration tests download UCI datasets, needs network on first run)
+make test                # or: uv run pytest
+uv run pytest tests/test_integration.py::test_xgboost_heart_disease_shamir -v  # single test
 
-# Run a single test
-uv run pytest tests/test_integration.py::test_xgboost_heart_disease_shamir -v
+# Lint and format
+make lint                # check only (ruff check + ruff format --check)
+make fix                 # auto-fix (ruff check --fix + ruff format)
 
 # Type checking
 uv run mypy src/
 
-# Run Jupyter notebooks
-uv run jupyter notebook
+# No build step — pure Python package. Verification is: make test && make lint
 ```
 
 ## Architecture
 
 privateboost implements privacy-preserving federated XGBoost via **Shamir secret sharing** with commitments. The protocol uses m-of-n threshold sharing (default 2-of-3).
+
+The key insight: Shamir shares are **additively homomorphic** — shareholders can sum shares from many clients and the aggregator reconstructs the sum of the original values without ever seeing individual data.
 
 ```
 Clients          ShareHolders       Aggregator
@@ -38,31 +41,33 @@ Clients          ShareHolders       Aggregator
                  └─────┘
 ```
 
-### Core Modules
+### Core Modules (`src/privateboost/`)
 
-- **`client.py`**: Holds one data sample. Creates Shamir shares with commitments and distributes to shareholders. Maintains XGBoost state (prediction, node assignment).
+- **`client.py`**: One instance per data sample. Creates Shamir shares with commitments and distributes to shareholders. Maintains XGBoost state (prediction, node assignment). Computes gradients and bins them into histograms.
 
-- **`shareholder.py`**: Stores shares by commitment. Sums shares for requested commitments and returns (x_coord, sum) for Shamir reconstruction. Enforces minimum N clients.
+- **`shareholder.py`**: Stores shares indexed by commitment hash. Sums shares for requested commitments and returns `(x_coord, sum)` for Lagrange reconstruction. Enforces minimum N clients before releasing any aggregate.
 
-- **`aggregator.py`**: Selects shareholders with largest commitment overlap, reconstructs aggregates using Lagrange interpolation. Computes mean/variance, defines histogram bins, finds optimal splits.
+- **`aggregator.py`**: Orchestrates the protocol. Selects shareholders with largest commitment overlap, reconstructs aggregates via Lagrange interpolation, computes mean/variance, defines histogram bins, finds optimal XGBoost splits (gain = `G²/(H+λ)`).
 
-- **`crypto/`**: Shamir sharing (`share`, `reconstruct`, `Share` dataclass) and commitment scheme (`compute_commitment`).
+- **`tree.py`**: `Tree` and `Model` dataclasses for prediction. `Model` is the ensemble: `prediction = initial + lr × Σ tree.predict()`. Uses `match` statements for tree traversal.
 
-- **`messages.py`**: Data classes (`CommittedStatsShare`, `CommittedGradientShare`, `BinConfiguration`, `SplitDecision`, `LeafNode`).
+- **`crypto/`**: `shamir.py` — `share()`, `reconstruct()`, `Share` dataclass. `commitment.py` — SHA256-based `compute_commitment(round_id, client_id, nonce)` for client anonymity.
+
+- **`messages.py`**: Protocol data classes (`CommittedStatsShare`, `CommittedGradientShare`, `BinConfiguration`, `SplitDecision`, `LeafNode`, etc.).
 
 ### Protocol Flow
 
-1. **Statistics round**: Clients share x and x² with commitments → aggregator reconstructs mean/variance
-2. **XGBoost training**: Per tree depth level:
-   - Clients compute gradients, create Shamir shares with commitments
-   - Aggregator selects shareholders, requests sums for valid commitments
-   - Shareholders sum shares, aggregator reconstructs via Lagrange interpolation
-   - Aggregator finds best splits, broadcasts to clients
-   - Leaf values computed from gradient sums
+1. **Statistics round**: Clients share `[x, x²]` per feature with commitments → aggregator reconstructs mean/variance → defines equal-width bins from `μ ± 3σ`
+2. **XGBoost training**: For each tree, for each depth level:
+   - Clients compute gradients (`g = ŷ − y`, `h = 1` for squared; `g = p − y`, `h = p(1−p)` for logistic)
+   - Clients bin gradients into histograms, create Shamir shares with fresh commitments
+   - Shareholders sum shares; aggregator selects shareholders, reconstructs histogram sums
+   - Aggregator scans bins to find best split per node (maximizing XGBoost gain)
+   - Clients update node assignments; leaf values = `−G/(H+λ)`
 
 ### Security Properties
 
 - **Threshold security**: Any m-1 colluding shareholders learn nothing
 - **Aggregate-only**: Aggregator sees only sums, never individual values
-- **Anonymous**: Aggregator sees commitment hashes, never client IDs
+- **Anonymous**: Aggregator sees commitment hashes, never client IDs (fresh nonce per round)
 - **Minimum N**: Shareholders reject requests for < N clients
