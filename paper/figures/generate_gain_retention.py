@@ -4,6 +4,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+plt.rcParams.update({'font.size': 14})
+
 # Data from notebook analysis
 features = ["age", "sex", "cp", "trestbps", "chol", "fbs", "restecg", "thalach", "exang", "oldpeak", "slope", "ca", "thal"]
 retentions = [100.0, 100.0, 100.0, 93.6, 99.7, 100.0, 100.0, 92.1, 100.0, 90.2, 100.0, 100.0, 100.0]
@@ -23,7 +25,7 @@ ax.grid(alpha=0.3, axis='y')
 
 for bar, ret in zip(bars, retentions):
     ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{ret:.0f}%',
-            ha='center', va='bottom', fontsize=8)
+            ha='center', va='bottom', fontsize=11)
 
 plt.tight_layout()
 plt.savefig('gain_retention.png', dpi=150, bbox_inches='tight')

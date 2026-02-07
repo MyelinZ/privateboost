@@ -1,4 +1,4 @@
-// Privacy-Preserving Federated XGBoost for Cross-Device Medical Applications
+// PrivateBoost: Privacy-Preserving Federated Gradient Boosting for Cross-Device Medical Data
 // ArXiv preprint
 
 #import "@preview/abbr:0.3.0"
@@ -12,8 +12,8 @@
 )
 
 #set document(
-  title: "Privacy-Preserving Federated XGBoost for Cross-Device Medical Applications",
-  author: "Bernhard Specht",
+  title: "PrivateBoost: Privacy-Preserving Federated Gradient Boosting for Cross-Device Medical Data",
+  author: ("Bernhard Specht", "Samaher Garbaya", "Orhan Ermis", "Reinhard Schneider", "Ricardo Chavarriaga", "Djamel Khadraoui", "Zied Tayeb"),
 )
 
 #set page(
@@ -40,14 +40,32 @@
   #block(width: 100%)[
     #align(center)[
       #text(size: 16pt, weight: "bold")[
-        Privacy-Preserving Federated XGBoost for Cross-Device Medical Applications
+        PrivateBoost: Privacy-Preserving Federated Gradient Boosting for Cross-Device Medical Data
       ]
 
       #v(0.8em)
 
       #text(size: 11pt)[
-        Author Names \
-        #text(size: 9pt, style: "italic")[]
+        Bernhard Specht#super[1,2,\*],
+        Samaher Garbaya#super[1],
+        Orhan Ermis#super[3],
+        Reinhard Schneider#super[4],
+        Ricardo Chavarriaga#super[5],
+        Djamel Khadraoui#super[3],
+        Zied Tayeb#super[1,6]
+      ]
+
+      #v(0.5em)
+
+      #text(size: 8pt)[
+        #super[1]MyelinZ, 125 Deansgate, Manchester M3 2BY, United Kingdom \
+        #super[2]University of Luxembourg, Esch-sur-Alzette, Luxembourg \
+        #super[3]Luxembourg Institute of Science and Technology (LIST), Esch-sur-Alzette, Luxembourg \
+        #super[4]Luxembourg Centre for Systems Biomedicine (LCSB), Esch-sur-Alzette, Luxembourg \
+        #super[5]ZHAW Zurich University of Applied Sciences, Winterthur, Switzerland \
+        #super[6]University of Lincoln, Lincoln, United Kingdom \
+        #v(0.3em)
+        #super[\*]Corresponding author: #raw("bernhard.specht@myelinz.com")
       ]
 
       #v(1em)
@@ -56,7 +74,7 @@
         #align(left)[
           #text(weight: "bold")[Abstract.]
           #text(size: 9pt)[
-            We present _privateboost_, a privacy-preserving federated XGBoost system for the extreme non-@IID:lsf setting where each client holds exactly one data sample. This cross-device setting arises naturally in medical applications where each patient controls their own record. Our protocol uses m-of-n Shamir secret sharing with commitment-based anonymous aggregation: raw feature values never leave the client, shareholders see only secret shares, and the aggregator reconstructs only aggregate sums for statistics and gradients. Unlike #[@SecAgg:lsf]-based approaches requiring client-to-client coordination for pairwise key agreement, our architecture uses a fixed set of shareholders where clients communicate only with shareholders, never with each other. We evaluate on @UCI:lsf medical datasets, demonstrating 98% split gain retention with accuracy comparable to centralized XGBoost, while maintaining resilience to client dropout.
+            Cross-device medical federated learning---where individual patients, rather than institutions, participate directly---poses a unique challenge: each client holds only a few samples, often just one (e.g., a single diagnostic record), leaving insufficient local data for gradient computation or secure pairwise aggregation. Existing approaches such as #[@SecAgg:lsf] require client-to-client coordination impractical for intermittently available mobile devices, while homomorphic encryption introduces substantial computational overhead. We present _privateboost_, a federated XGBoost system that addresses this setting through m-of-n Shamir secret sharing with commitment-based anonymous aggregation. Clients distribute shares to a fixed set of shareholders---requiring no client-to-client communication---and the aggregator reconstructs only aggregate gradient sums via Lagrange interpolation, never observing individual values or client identities. We evaluate on @UCI:lsf medical datasets, demonstrating 98% split gain retention relative to centralized XGBoost and accuracy resilient to up to 80% client dropout.
           ]
         ]
       ]
@@ -181,6 +199,8 @@ After reaching maximum depth, leaf values are computed from gradient sums and th
 
 *Shareholder path visibility.* Shareholders observe which bin each client submits gradients to, revealing individual tree paths. This can be addressed using the path hiding technique described in Section 6.3: clients submit shares for all possible paths, with only the true path containing non-zero values. However, this incurs communication overhead that grows exponentially with tree depth ($O(2^d)$ per client per round).
 
+*Cross-round linkability.* Commitment hashes are fresh per round (using a new random nonce each time), preventing the aggregator from linking submissions across rounds. However, shareholders can link a client's submissions across rounds via transport-layer identity (e.g., network address). This is a transport-level concern, not a protocol-level one, and is straightforwardly mitigated by routing client submissions through an anonymous communication channel.
+
 *No differential privacy.* The protocol reveals exact aggregate sums. Future work addresses formal differential privacy guarantees.
 
 *Malicious clients.* The protocol assumes honest-but-curious clients. In practice, mobile deployments can leverage platform attestation mechanisms (such as App Check tokens on Android and App Attest on iOS) to verify that participating clients are running legitimate, unmodified application code. This provides a practical defense against Sybil attacks and gradient poisoning without requiring cryptographic verification of individual contributions.
@@ -206,12 +226,18 @@ Across all three datasets, _privateboost_ achieves competitive test accuracy. On
 
 The Heart Disease result is notable: _privateboost_ outperforms both XGBoost configurations, which we attribute to a regularization effect from histogram binning that reduces overfitting on smaller datasets.
 
+*Split gain retention.* To quantify the information loss from histogram binning, we define _split gain retention_ per feature $f$ as:
+
+$ R_f = G_f^"hist" / G_f^"exact" $
+
+where $G_f^"exact"$ is the optimal split gain obtained by exhaustive search over all unique thresholds in feature $f$ (equivalent to centralized XGBoost with no binning), and $G_f^"hist"$ is the best split gain when restricted to the $B$ histogram bin edges derived from the privacy-preserving statistics phase. Both gains use the same gradient and Hessian values, evaluated at the root level using initial predictions. We report mean retention $macron(R) = 1/F sum_(f=1)^F R_f$ across all $F$ features.
+
 #figure(
   image("figures/gain_retention.png", width: 100%),
-  caption: [Split gain retention per feature on Heart Disease. Mean retention 98% across features.]
+  caption: [Split gain retention $R_f$ per feature on Heart Disease. Mean retention $macron(R) = 98%$ across 13 features.]
 )
 
-Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in few bins. On Heart Disease, this explains the 90-93% gain retention observed on features like `oldpeak`. Quantile-based binning via federated sketching could address this, though it would require additional protocol rounds.
+On Heart Disease, mean retention is $macron(R) = 98.1%$ across 13 features, with 10 features achieving $R_f = 100%$. Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in few bins. This explains the 90-93% retention observed on features like `oldpeak`.
 
 In cross-device settings, clients are intermittently available: mobile devices go offline, patients miss check-ins, or network connectivity fails. The protocol must tolerate such dropout without requiring all clients to participate in every round.
 
@@ -254,6 +280,12 @@ This 8× overhead grows exponentially with depth, making the extension most prac
 We presented _privateboost_, a privacy-preserving federated XGBoost system for the extreme non-@IID:s setting where each client holds exactly one sample. Our protocol ensures raw data never leaves the client, requires no client-to-client coordination, and provides resilience to participant dropout.
 
 Evaluation on medical datasets demonstrates 98% split gain retention with accuracy comparable to centralized XGBoost. The system enables true cross-device medical federated learning where patients can participate directly without institutional intermediaries.
+
+=== Acknowledgement
+The authors would like to thank the Ministry of the Economy in Luxembourg and its digital health directorate for supporting this research. Similarly, we would like to thank the Luxembourg National Research Fund (FNR) for funding this research.
+
+=== Funding
+This work was supported in part by a PhD grant from the Luxembourg National Research Fund (FNR) under the project reference 17223919/MMS/Industrial Fellowship.
 
 #v(2em)
 

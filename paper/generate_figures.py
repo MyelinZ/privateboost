@@ -11,6 +11,8 @@ from pathlib import Path
 
 from privateboost import Client, ShareHolder, Aggregator
 
+plt.rcParams.update({'font.size': 14})
+
 # Hyperparameters
 N_TREES = 15
 MAX_DEPTH = 3

@@ -1,15 +1,33 @@
-\documentclass[a4paper,10pt,twocolumn]{article}
+\documentclass[twocolumn]{article}
 
-\usepackage[margin=1.5cm,top=2cm,bottom=2cm]{geometry}
+\usepackage{arxiv}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{hyperref}
-\usepackage{url}
 \usepackage{booktabs}
-\usepackage{stfloats} % for figure* placement at bottom
+\usepackage[numbers]{natbib}
+\usepackage{authblk}
 
-\title{Privacy-Preserving Federated XGBoost for Cross-Device Medical Applications}
-\author{Author Names}
+\renewcommand{\headeright}{}
+\renewcommand{\undertitle}{}
+
+\title{PrivateBoost: Privacy-Preserving Federated Gradient Boosting for Cross-Device Medical Data}
+
+\author[1,2]{Bernhard Specht\thanks{Corresponding author: \texttt{bernhard.specht@myelinz.com}}}
+\author[1]{Samaher Garbaya}
+\author[3]{Orhan Ermis}
+\author[4]{Reinhard Schneider}
+\author[5]{Ricardo Chavarriaga}
+\author[3]{Djamel Khadraoui}
+\author[1,6]{Zied Tayeb}
+
+\affil[1]{MyelinZ, Manchester, UK / San Francisco, USA / Leuven, Belgium /Luxembourg}
+\affil[2]{University of Luxembourg, Esch-sur-Alzette, Luxembourg}
+\affil[3]{Luxembourg Institute of Science and Technology (LIST), Esch-sur-Alzette, Luxembourg}
+\affil[4]{Luxembourg Centre for Systems Biomedicine (LCSB), Esch-sur-Alzette, Luxembourg}
+\affil[5]{ZHAW Zurich University of Applied Sciences, Winterthur, Switzerland}
+\affil[6]{University of Lincoln, Lincoln, United Kingdom}
+
 \date{}
 
 \begin{document}
@@ -18,7 +36,7 @@
   \maketitle
   \begin{@twocolumnfalse}
   \begin{abstract}
-    We present \textit{privateboost}, a privacy-preserving federated XGBoost system for the extreme non-IID setting where each client holds exactly one data sample. This cross-device setting arises naturally in medical applications where each patient controls their own record. Our protocol uses m-of-n Shamir secret sharing with commitment-based anonymous aggregation: raw feature values never leave the client, shareholders see only secret shares, and the aggregator reconstructs only aggregate sums for statistics and gradients. Unlike Secure Aggregation (SecAgg)-based approaches requiring client-to-client coordination for pairwise key agreement, our architecture uses a fixed set of shareholders where clients communicate only with shareholders, never with each other. We evaluate on University of California, Irvine (UCI) medical datasets, demonstrating 98\% split gain retention with accuracy comparable to centralized XGBoost, while maintaining resilience to client dropout.
+  Cross-device medical federated learning---where individual patients participate directly rather than institutions---poses a unique challenge: each client holds only a few samples, often just one (e.g., a single diagnostic record), leaving insufficient local data for gradient computation. Existing approaches, such as Secure Aggregation, require client-to-client coordination impractical for intermittently available mobile devices, while homomorphic encryption introduces substantial computational overhead. We present \textit{privateboost}, a federated XGBoost system that addresses this setting through m-of-n Shamir secret sharing with commitment-based anonymous aggregation. Clients distribute shares to a fixed set of shareholders---requiring no client-to-client communication---and the aggregator reconstructs only aggregate gradient sums via Lagrange interpolation, never observing individual values or client identities. We evaluate on UCI medical datasets, demonstrating 98\% split gain retention relative to centralized XGBoost and accuracy resilient to up to 80\% client dropout.
   \end{abstract}
   \vspace{1em}
   \end{@twocolumnfalse}
@@ -30,7 +48,7 @@ Federated learning enables machine learning on distributed data without centrali
 
 In medical settings, ``federated learning'' typically means hospitals or research institutions each manage patient cohorts~\cite{rieke2020,sheller2020}, with the institution serving as a trusted aggregation point for its patients' data. True \textit{cross-device} medical federated learning, where individual patients control their own records without institutional intermediaries, remains largely unexplored. Cross-device settings have been studied for applications like mobile keyboard prediction~\cite{hard2018}, but medical applications present unique challenges.
 
-First, \textit{extreme non-IID data}: each client holds exactly one sample. A patient participating in a federated study contributes their single health record. There are no local batches, no local gradients to average; each participant is a single data point. Second, tree-based methods like XGBoost~\cite{chen2016} require global statistics (gradient histograms across all samples) to find optimal split points. Without local batches large enough for meaningful statistics or secure aggregation, clients cannot contribute to these histograms without revealing their individual values.
+First, \textit{extreme non-IID data}: each client holds only a few samples, often just one. A patient participating in a federated study may contribute only their single health record. There are no local batches large enough for meaningful gradient computation; each participant is effectively a single data point. Second, tree-based methods like XGBoost~\cite{chen2016} require global statistics (gradient histograms across all samples) to find optimal split points. Without local batches large enough for meaningful statistics or secure aggregation, clients cannot contribute to these histograms without revealing their individual values.
 
 Existing privacy-preserving approaches face practical barriers in this setting. SecAgg~\cite{bonawitz2017} requires client-to-client coordination for pairwise key agreement, which is problematic when clients are intermittently online mobile devices. Homomorphic encryption~\cite{aono2017} enables computation on encrypted data but introduces substantial computational overhead.
 
@@ -65,7 +83,7 @@ Our work addresses the orthogonal \textit{horizontal} federated setting with ext
 
 \subsection{Secret Sharing in Machine Learning}
 
-Shamir secret sharing~\cite{shamir1979} is a foundational primitive for multi-party computation (MPC)~\cite{benor1988}. Verifiable extensions~\cite{gennaro1998} enable detection of malicious behavior. These techniques have been applied in MPC frameworks for machine learning inference, but less explored for federated training.
+Shamir secret sharing~\cite{shamir1979} is a foundational primitive for multi-party computation (MPC)~\cite{benor1988}. Verifiable extensions~\cite{gennaro1998} enable detection of malicious behavior. These techniques have been applied in MPC frameworks for machine learning inference, but not extensively explored for federated training.
 
 The key property we exploit is \textit{additive homomorphism}: the sum of shares equals shares of the sum, enabling aggregation without reconstruction of individual values.
 
@@ -131,13 +149,15 @@ After reaching maximum depth, leaf values are computed from gradient sums and th
 
 \textbf{Shareholders} receive shares tagged with client identifiers and commitment hashes. They use identifiers to prevent duplicate submissions but do not forward them to the aggregator. Shareholders cannot reconstruct values without colluding with at least $m-1$ other shareholders. The collusion threshold is configurable: with m-of-n sharing, at least m shareholders must collude to reconstruct individual values. Increasing from 2-of-3 to 3-of-5 or higher provides stronger guarantees while maintaining dropout tolerance. Shareholders sum shares for requested commitments and return only these aggregated sums.
 
-\textbf{The aggregator} receives summed shares from shareholders and reconstructs aggregate gradient sums via Lagrange interpolation. Crucially, it never sees client identifiers, only opaque commitment hashes. It learns split thresholds (necessary for prediction) and gradient sums per bin. It learns how many clients fall into each tree branch but not which specific clients.
+\textbf{The aggregator} receives summed shares from shareholders and reconstructs aggregate gradient sums via Lagrange interpolation. Crucially, it never sees client identifiers, only opaque commitment hashes. It learns split thresholds (necessary for prediction) and gradient sums per bin. It learns how many clients fall into each tree branch, but not which specific clients.
 
 \subsection{Limitations}
 
-\textbf{Branch counts.} The aggregator learns client counts per tree branch. For branches with very few clients, this narrows the anonymity set. Combined with auxiliary information, this could enable inference attacks. This motivates k-anonymous tree constraints (Section~6.2).
+\textbf{Branch counts.} The aggregator learns client counts per tree branch. For branches with very few clients, this narrows the anonymity set. Combined with auxiliary information, this could enable inference attacks. This motivates k-anonymous tree constraints (Section~\ref{sec:k-anonymous}).
 
-\textbf{Shareholder path visibility.} Shareholders observe which bin each client submits gradients to, revealing individual tree paths. This can be addressed using the path hiding technique described in Section~6.3: clients submit shares for all possible paths, with only the true path containing non-zero values. However, this incurs communication overhead that grows exponentially with tree depth ($O(2^d)$ per client per round).
+\textbf{Shareholder path visibility.} Shareholders observe which bin each client submits gradients to, revealing individual tree paths. This can be addressed using the path hiding technique described in Section~\ref{sec:path-hiding}: clients submit shares for all possible paths, with only the true path containing non-zero values. However, this incurs communication overhead that grows exponentially with tree depth ($O(2^d)$ per client per round).
+
+\textbf{Cross-round linkability.} Commitment hashes are fresh per round (using a new random nonce each time), preventing the aggregator from linking submissions across rounds. However, shareholders can link a client's submissions across rounds via transport-layer identity (e.g., network address). This is a transport-level concern, not a protocol-level one, and is straightforwardly mitigated by routing client submissions through an anonymous communication channel.
 
 \textbf{No differential privacy.} The protocol reveals exact aggregate sums. Future work addresses formal differential privacy guarantees.
 
@@ -149,12 +169,12 @@ After reaching maximum depth, leaf values are computed from gradient sums and th
 
 We evaluate on three medical datasets from the UCI Machine Learning Repository~\cite{uci2019}. Heart Disease~\cite{detrano1989} (297 samples) predicts coronary artery disease from 13 clinical features. Breast Cancer~\cite{street1993} (569 samples) classifies tumors using 30 cell nuclei measurements. Pima Diabetes~\cite{smith1988} (768 samples) predicts diabetes onset from 8 diagnostic measurements. We use an 80/20 train/test split for all datasets.
 
-We use 2-of-3 Shamir threshold, 10 bins per feature, max depth 3, 15 trees, learning rate 0.15, and regularization $\lambda = 2.0$. Bins are equal-width, spanning $\mu \pm 3\sigma$ computed from aggregated statistics. We compare against XGBoost with matched hyperparameters and XGBoost with default settings.
+Following the protocol design, each client holds exactly one sample: we instantiate one client per training example. We use a 2-of-3 Shamir threshold, 10 bins per feature, max depth 3, 15 trees, learning rate 0.15, and regularization $\lambda = 2.0$. Bins are equal-width, spanning $\mu \pm 3\sigma$ computed from aggregated statistics. We compare against XGBoost with matched hyperparameters and XGBoost with default settings.
 
 \begin{figure*}[t]
   \centering
   \includegraphics[width=\textwidth]{figures/learning_curves.png}
-  \caption{Learning curves comparing \textit{privateboost} to XGBoost across three medical datasets.}
+  \caption{Test accuracy vs.\ number of trees for \textit{privateboost}, XGBoost with matched hyperparameters, and XGBoost with defaults across three medical datasets.}
   \label{fig:learning_curves}
 \end{figure*}
 
@@ -162,14 +182,22 @@ Across all three datasets, \textit{privateboost} achieves competitive test accur
 
 The Heart Disease result is notable: \textit{privateboost} outperforms both XGBoost configurations, which we attribute to a regularization effect from histogram binning that reduces overfitting on smaller datasets.
 
+\textbf{Split gain retention.} To quantify the information loss from histogram binning, we define \textit{split gain retention} per feature $f$ as:
+
+\begin{equation}
+  R_f = \frac{G_f^{\text{hist}}}{G_f^{\text{exact}}}
+\end{equation}
+
+where $G_f^{\text{exact}}$ is the optimal split gain obtained by exhaustive search over all unique thresholds in feature $f$ (equivalent to centralized XGBoost with no binning), and $G_f^{\text{hist}}$ is the best split gain when restricted to the $B$ histogram bin edges derived from the privacy-preserving statistics phase. Both gains use the same gradient and Hessian values, evaluated at the root level using initial predictions. We report mean retention $\bar{R} = \frac{1}{F} \sum_{f=1}^{F} R_f$ across all $F$ features.
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=\columnwidth]{figures/gain_retention.png}
-  \caption{Split gain retention per feature on Heart Disease. Mean retention 98\% across features.}
+  \caption{Split gain retention $R_f$ per feature on Heart Disease. Mean retention $\bar{R} = 98\%$ across 13 features.}
   \label{fig:gain_retention}
 \end{figure}
 
-Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in few bins. On Heart Disease, this explains the 90--93\% gain retention observed on features like \texttt{oldpeak}. Quantile-based binning via federated sketching could address this, though it would require additional protocol rounds.
+On Heart Disease, mean retention is $\bar{R} = 98.1\%$ across 13 features, with 10 features achieving $R_f = 100\%$ (Figure~\ref{fig:gain_retention}). Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in a few bins. This explains the 90--93\% retention observed on features like \texttt{oldpeak}.
 
 In cross-device settings, clients are intermittently available: mobile devices go offline, patients miss check-ins, or network connectivity fails. The protocol must tolerate such dropout without requiring all clients to participate in every round.
 
@@ -189,10 +217,12 @@ The protocol naturally handles dropout: the aggregator reconstructs from whichev
 Adding calibrated Laplace noise to gradient sums before reconstruction would provide formal $(\varepsilon, \delta)$-differential privacy~\cite{dwork2014}. Similar techniques have been applied to deep learning~\cite{abadi2016}. The noise scale can be calibrated using the mean and variance statistics already computed during the binning phase, incurring no additional privacy cost. We suggest per-tree budgets of $\varepsilon = 1.0$--$2.0$ with composition accounting across the ensemble.
 
 \subsection{K-Anonymous Tree Structure}
+\label{sec:k-anonymous}
 
 To prevent membership inference via branch analysis, splits could be constrained to ensure at least $k$ clients in every resulting node, inspired by k-anonymity principles~\cite{sweeney2002}. This extends the existing minimum-client enforcement in shareholders to the tree structure itself. Splits that would create nodes with fewer than $k$ clients would be rejected, trading some model expressiveness for stronger privacy guarantees.
 
 \subsection{Private Path Hiding}
+\label{sec:path-hiding}
 
 In the current protocol, the aggregator learns how many clients traverse each branch of the tree, even though it cannot identify which specific clients. This branch count information could narrow the anonymity set, particularly for branches with few clients.
 
@@ -209,11 +239,17 @@ This $8\times$ overhead grows exponentially with depth, making the extension mos
 
 \section{Conclusion}
 
-We presented \textit{privateboost}, a privacy-preserving federated XGBoost system for the extreme non-IID setting where each client holds exactly one sample. Our protocol ensures raw data never leaves the client, requires no client-to-client coordination, and provides resilience to participant dropout.
+We presented \textit{privateboost}, a privacy-preserving federated XGBoost system for the extreme non-IID setting where each client holds only a few samples, often just one. Our protocol ensures raw data never leaves the client, requires no client-to-client coordination, and provides resilience to participant dropout.
 
 Evaluation on medical datasets demonstrates 98\% split gain retention with accuracy comparable to centralized XGBoost. The system enables true cross-device medical federated learning where patients can participate directly without institutional intermediaries.
 
-\bibliographystyle{ieeetr}
+\section*{Acknowledgement}
+The authors would like to thank the Ministry of the Economy in Luxembourg and its digital health directorate for co-supporting this research. Similarly, we would like to thank the Luxembourg National Research Fund (FNR) for partially funding this research.
+
+\section*{Funding}
+This work was supported in part by a PhD grant from the Luxembourg National Research Fund (FNR) under the project reference 17223919/MMS/Industrial Fellowship.
+
+\bibliographystyle{unsrtnat}
 \bibliography{references}
 
 \end{document}
