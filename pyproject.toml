@@ -27,6 +27,9 @@ dev = [
     "reffix>=0.1.0",
 ]
 
+[tool.ruff]
+exclude = ["src/privateboost/grpc/privateboost_pb2*"]
+
 [build-system]
 requires = ["uv_build>=0.9.22,<0.10.0"]
 build-backend = "uv_build"

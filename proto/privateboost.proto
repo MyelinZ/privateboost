@@ -1,0 +1,236 @@
+syntax = "proto3";
+package privateboost;
+
+// -- Shared messages --
+
+enum DType {
+  FLOAT64 = 0;
+  FLOAT32 = 1;
+  INT32 = 2;
+  INT64 = 3;
+}
+
+message NdArray {
+  DType dtype = 1;
+  repeated int64 shape = 2;
+  bytes data = 3;
+}
+
+message Share {
+  int32 x = 1;
+  NdArray y = 2;
+}
+
+// -- ShareholderService --
+
+service ShareholderService {
+  rpc SubmitStats(SubmitStatsRequest) returns (SubmitStatsResponse);
+  rpc SubmitGradients(SubmitGradientsRequest) returns (SubmitGradientsResponse);
+
+  rpc GetStatsCommitments(GetStatsCommitmentsRequest) returns (GetStatsCommitmentsResponse);
+  rpc GetGradientCommitments(GetGradientCommitmentsRequest) returns (GetGradientCommitmentsResponse);
+  rpc GetGradientNodeIds(GetGradientNodeIdsRequest) returns (GetGradientNodeIdsResponse);
+  rpc GetStatsSum(GetStatsSumRequest) returns (GetStatsSumResponse);
+  rpc GetGradientsSum(GetGradientsSumRequest) returns (GetGradientsSumResponse);
+
+  rpc CancelSession(CancelSessionRequest) returns (CancelSessionResponse);
+  rpc Reset(ResetRequest) returns (ResetResponse);
+}
+
+message SubmitStatsRequest {
+  string session_id = 1;
+  bytes commitment = 2;
+  Share share = 3;
+}
+message SubmitStatsResponse {}
+
+message SubmitGradientsRequest {
+  string session_id = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+  bytes commitment = 4;
+  Share share = 5;
+  int32 node_id = 6;
+}
+message SubmitGradientsResponse {}
+
+message GetStatsCommitmentsRequest {
+  string session_id = 1;
+}
+message GetStatsCommitmentsResponse {
+  repeated bytes commitments = 1;
+}
+
+message GetGradientCommitmentsRequest {
+  string session_id = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+}
+message GetGradientCommitmentsResponse {
+  repeated bytes commitments = 1;
+}
+
+message GetGradientNodeIdsRequest {
+  string session_id = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+}
+message GetGradientNodeIdsResponse {
+  repeated int32 node_ids = 1;
+}
+
+message GetStatsSumRequest {
+  string session_id = 1;
+  repeated bytes commitments = 2;
+}
+message GetStatsSumResponse {
+  NdArray sum = 1;
+}
+
+message GetGradientsSumRequest {
+  string session_id = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+  repeated bytes commitments = 4;
+  int32 node_id = 5;
+}
+message GetGradientsSumResponse {
+  NdArray sum = 1;
+}
+
+message CancelSessionRequest {
+  string session_id = 1;
+}
+message CancelSessionResponse {}
+
+message ResetRequest {
+  string session_id = 1;
+}
+message ResetResponse {}
+
+// -- AggregatorService --
+
+service AggregatorService {
+  rpc JoinSession(JoinSessionRequest) returns (JoinSessionResponse);
+  rpc CancelSession(CancelSessionRequest) returns (CancelSessionResponse);
+  rpc GetRoundState(GetRoundStateRequest) returns (GetRoundStateResponse);
+  rpc GetTrainingState(GetTrainingStateRequest) returns (GetTrainingStateResponse);
+  rpc GetModel(GetModelRequest) returns (GetModelResponse);
+}
+
+enum Phase {
+  WAITING_FOR_CLIENTS = 0;
+  COLLECTING_GRADIENTS = 1;
+  TRAINING_COMPLETE = 2;
+}
+
+message JoinSessionRequest {
+  string session_id = 1;
+}
+
+message JoinSessionResponse {
+  string session_id = 1;
+  repeated ShareholderInfo shareholders = 2;
+  int32 threshold = 3;
+  TrainingConfig config = 4;
+}
+
+message ShareholderInfo {
+  string id = 1;
+  string address = 2;
+  int32 x_coord = 3;
+}
+
+message TrainingConfig {
+  repeated FeatureSpec features = 1;
+  string target_column = 2;
+  string loss = 3;
+  int32 n_bins = 4;
+  int32 n_trees = 5;
+  int32 max_depth = 6;
+  double learning_rate = 7;
+  double lambda_reg = 8;
+  int32 min_clients = 9;
+  oneof target {
+    int32 target_count = 10;
+    float target_fraction = 11;
+  }
+}
+
+message FeatureSpec {
+  int32 index = 1;
+  string name = 2;
+}
+
+message GetRoundStateRequest {
+  string session_id = 1;
+}
+message GetRoundStateResponse {
+  Phase phase = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+}
+
+message GetTrainingStateRequest {
+  string session_id = 1;
+}
+message GetTrainingStateResponse {
+  Model model = 1;
+  map<int32, SplitDecision> current_splits = 2;
+  repeated BinConfiguration bins = 3;
+  int32 round_id = 4;
+  int32 depth = 5;
+}
+
+message GetModelRequest {
+  string session_id = 1;
+}
+message GetModelResponse {
+  Model model = 1;
+}
+
+// -- Shared model messages --
+
+message BinConfiguration {
+  int32 feature_idx = 1;
+  NdArray edges = 2;
+  NdArray inner_edges = 3;
+  int32 n_bins = 4;
+}
+
+message SplitDecision {
+  int32 node_id = 1;
+  int32 feature_idx = 2;
+  double threshold = 3;
+  double gain = 4;
+  int32 left_child_id = 5;
+  int32 right_child_id = 6;
+}
+
+message Model {
+  double initial_prediction = 1;
+  double learning_rate = 2;
+  repeated Tree trees = 3;
+}
+
+message Tree {
+  TreeNode root = 1;
+}
+
+message TreeNode {
+  oneof node {
+    SplitNode split = 1;
+    LeafNode leaf = 2;
+  }
+}
+
+message SplitNode {
+  int32 feature_idx = 1;
+  double threshold = 2;
+  TreeNode left = 3;
+  TreeNode right = 4;
+}
+
+message LeafNode {
+  double value = 1;
+}

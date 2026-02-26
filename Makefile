@@ -1,4 +1,4 @@
-.PHONY: test lint fix
+.PHONY: test lint fix proto
 
 test:
 	uv run pytest
@@ -10,3 +10,11 @@ lint:
 fix:
 	uv run ruff check --fix src/ tests/
 	uv run ruff format src/ tests/
+
+proto:
+	uv run python -m grpc_tools.protoc \
+		-I proto \
+		--python_out=src/privateboost/grpc \
+		--pyi_out=src/privateboost/grpc \
+		--grpc_python_out=src/privateboost/grpc \
+		proto/privateboost.proto
