@@ -95,6 +95,8 @@ class ShareholderServicer(pb_grpc.ShareholderServiceServicer):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.GetGradientCommitmentsResponse()
+        if sh._current_round_id != request.round_id:
+            return pb.GetGradientCommitmentsResponse()
         return pb.GetGradientCommitmentsResponse(
             commitments=list(sh.get_gradient_commitments(request.depth))
         )
@@ -102,6 +104,8 @@ class ShareholderServicer(pb_grpc.ShareholderServiceServicer):
     def GetGradientNodeIds(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
+            return pb.GetGradientNodeIdsResponse()
+        if sh._current_round_id != request.round_id:
             return pb.GetGradientNodeIdsResponse()
         return pb.GetGradientNodeIdsResponse(
             node_ids=list(sh.get_gradient_node_ids(request.depth))

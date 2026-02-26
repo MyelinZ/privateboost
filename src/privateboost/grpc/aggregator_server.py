@@ -29,6 +29,7 @@ class RemoteShareHolder:
     def __init__(self, address: str, x_coord: int, session_id: str):
         self.x_coord = x_coord
         self._session_id = session_id
+        self._round_id = 0
         self._channel = grpc.insecure_channel(address)
         self._stub = pb_grpc.ShareholderServiceStub(self._channel)
 
@@ -42,7 +43,7 @@ class RemoteShareHolder:
         resp = self._stub.GetGradientCommitments(
             pb.GetGradientCommitmentsRequest(
                 session_id=self._session_id,
-                round_id=0,
+                round_id=self._round_id,
                 depth=depth,
             )
         )
@@ -52,7 +53,7 @@ class RemoteShareHolder:
         resp = self._stub.GetGradientNodeIds(
             pb.GetGradientNodeIdsRequest(
                 session_id=self._session_id,
-                round_id=0,
+                round_id=self._round_id,
                 depth=depth,
             )
         )
@@ -76,7 +77,7 @@ class RemoteShareHolder:
         resp = self._stub.GetGradientsSum(
             pb.GetGradientsSumRequest(
                 session_id=self._session_id,
-                round_id=0,
+                round_id=self._round_id,
                 depth=depth,
                 commitments=commitments,
                 node_id=node_id,
@@ -196,17 +197,8 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                 state.round_id = round_id
                 state.depth = 0
 
-            if round_id > 0:
-                # Wait for the gradient store to be cleared by clients
-                # submitting for the new round_id (which resets the store)
-                while True:
-                    try:
-                        commitments = agg._shareholders[0].get_gradient_commitments(0)
-                        if len(commitments) < target:
-                            break
-                    except Exception:
-                        break
-                    time.sleep(0.1)
+            for rsh in state.remote_shareholders:
+                rsh._round_id = round_id
 
             for depth in range(self._max_depth):
                 with self._lock:
