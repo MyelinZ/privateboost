@@ -34,6 +34,11 @@ class ShareHolder:
         self._gradients: GradientStore = _new_gradient_store()
         self._current_round_id: int = -1
 
+    @property
+    def current_round_id(self) -> int:
+        """The round_id of the most recently received gradient data."""
+        return self._current_round_id
+
     def receive_stats(self, msg: CommittedStatsShare) -> None:
         """Receive and store stats share from a client."""
         self._stats[msg.commitment] = msg.share

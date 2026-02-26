@@ -28,8 +28,8 @@ class RemoteShareHolder:
 
     def __init__(self, address: str, x_coord: int, session_id: str):
         self.x_coord = x_coord
+        self.round_id = 0
         self._session_id = session_id
-        self._round_id = 0
         self._channel = grpc.insecure_channel(address)
         self._stub = pb_grpc.ShareholderServiceStub(self._channel)
 
@@ -43,7 +43,7 @@ class RemoteShareHolder:
         resp = self._stub.GetGradientCommitments(
             pb.GetGradientCommitmentsRequest(
                 session_id=self._session_id,
-                round_id=self._round_id,
+                round_id=self.round_id,
                 depth=depth,
             )
         )
@@ -53,7 +53,7 @@ class RemoteShareHolder:
         resp = self._stub.GetGradientNodeIds(
             pb.GetGradientNodeIdsRequest(
                 session_id=self._session_id,
-                round_id=self._round_id,
+                round_id=self.round_id,
                 depth=depth,
             )
         )
@@ -77,7 +77,7 @@ class RemoteShareHolder:
         resp = self._stub.GetGradientsSum(
             pb.GetGradientsSumRequest(
                 session_id=self._session_id,
-                round_id=self._round_id,
+                round_id=self.round_id,
                 depth=depth,
                 commitments=commitments,
                 node_id=node_id,
@@ -94,6 +94,7 @@ class SessionState:
     phase: int = 0  # pb.WAITING_FOR_CLIENTS
     round_id: int = 0
     depth: int = 0
+    cancelled: bool = False
     aggregator: Aggregator | None = None
     remote_shareholders: list[RemoteShareHolder] = field(default_factory=list)
     training_thread: threading.Thread | None = None
@@ -173,14 +174,15 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
             return state
 
     def _run_training(self, session_id: str) -> None:
-        state = self._sessions.get(session_id)
+        with self._lock:
+            state = self._sessions.get(session_id)
         if state is None or state.aggregator is None:
             return
 
         agg = state.aggregator
         target = self._target_count or self._min_clients
 
-        while True:
+        while not state.cancelled:
             try:
                 commitments = agg._shareholders[0].get_stats_commitments()
                 if len(commitments) >= target:
@@ -188,23 +190,32 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
             except Exception:
                 pass
             time.sleep(0.1)
+        if state.cancelled:
+            return
 
-        agg.define_bins()
+        with self._lock:
+            agg.define_bins()
 
         for round_id in range(self._n_trees):
+            if state.cancelled:
+                return
+
             with self._lock:
                 state.phase = pb.COLLECTING_GRADIENTS
                 state.round_id = round_id
                 state.depth = 0
 
             for rsh in state.remote_shareholders:
-                rsh._round_id = round_id
+                rsh.round_id = round_id
 
             for depth in range(self._max_depth):
+                if state.cancelled:
+                    return
+
                 with self._lock:
                     state.depth = depth
 
-                while True:
+                while not state.cancelled:
                     try:
                         commitments = agg._shareholders[0].get_gradient_commitments(
                             depth
@@ -214,11 +225,15 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                     except Exception:
                         pass
                     time.sleep(0.1)
+                if state.cancelled:
+                    return
 
-                if not agg.compute_splits(depth=depth, min_samples=1):
-                    break
+                with self._lock:
+                    if not agg.compute_splits(depth=depth, min_samples=1):
+                        break
 
-            agg.finish_round()
+            with self._lock:
+                agg.finish_round()
 
         with self._lock:
             state.phase = pb.TRAINING_COMPLETE
@@ -298,6 +313,8 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
     def CancelSession(self, request, context):
         with self._lock:
             state = self._sessions.pop(request.session_id, None)
+            if state is not None:
+                state.cancelled = True
         if state is not None:
             for rsh in state.remote_shareholders:
                 try:

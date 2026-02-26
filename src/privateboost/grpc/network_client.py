@@ -1,13 +1,13 @@
 """gRPC-based client for the privateboost protocol."""
 
-import hashlib
+import os
 from typing import Dict, List
 
 import grpc
 import numpy as np
 
 from privateboost.client import _find_bin_index
-from privateboost.crypto import generate_nonce, compute_commitment, share
+from privateboost.crypto import compute_commitment, generate_nonce, share
 from privateboost.messages import BinConfiguration, Loss, SplitDecision
 from privateboost.tree import Model
 
@@ -33,15 +33,16 @@ class NetworkClient:
         self.session_id = session_id
         self.threshold = threshold
         self._n_parties = len(shareholder_addresses)
+        # Fixed nonce for stats: same client always produces the same commitment
+        # (dedup on shareholder), but the nonce is random so the aggregator
+        # cannot link the commitment back to a client_id.
+        self._stats_nonce = os.urandom(32)
 
         self._channels = [grpc.insecure_channel(addr) for addr in shareholder_addresses]
         self._stubs = [pb_grpc.ShareholderServiceStub(ch) for ch in self._channels]
 
     def _stats_commitment(self) -> bytes:
-        h = hashlib.sha256()
-        h.update(self.session_id.encode("utf-8"))
-        h.update(self.client_id.encode("utf-8"))
-        return h.digest()
+        return compute_commitment(0, self.session_id, self._stats_nonce)
 
     def submit_stats(self) -> None:
         commitment = self._stats_commitment()
