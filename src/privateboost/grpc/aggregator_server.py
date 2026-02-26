@@ -196,6 +196,18 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                 state.round_id = round_id
                 state.depth = 0
 
+            if round_id > 0:
+                # Wait for the gradient store to be cleared by clients
+                # submitting for the new round_id (which resets the store)
+                while True:
+                    try:
+                        commitments = agg._shareholders[0].get_gradient_commitments(0)
+                        if len(commitments) < target:
+                            break
+                    except Exception:
+                        break
+                    time.sleep(0.1)
+
             for depth in range(self._max_depth):
                 with self._lock:
                     state.depth = depth
