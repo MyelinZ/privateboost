@@ -1,12 +1,16 @@
-# gRPC Implementation Plan
+# gRPC + Docker Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement gRPC servers and client for the privateboost federated XGBoost protocol, turning the in-process simulation into a networked system.
+**Goal:** Implement gRPC servers, network client, Docker containers, and a simulation script for the privateboost federated XGBoost protocol.
 
-**Architecture:** The ShareholderService and AggregatorService are gRPC servers wrapping the existing `ShareHolder` and `Aggregator` classes. A new `NetworkClient` replaces direct method calls with gRPC RPCs. Serialization helpers convert between Python dataclasses/numpy arrays and protobuf messages. An integration test spins up all servers in-process and runs the full protocol over gRPC.
+**Architecture:** ShareholderService and AggregatorService are gRPC servers wrapping the existing core classes. Shareholders are pure storage — no x_coord config. The aggregator assigns x_coords from its ordered shareholder list. A NetworkClient replaces direct method calls with gRPC RPCs. Docker Compose orchestrates 3 shareholders + 1 aggregator. A host-side simulation script runs the full protocol.
 
-**Tech Stack:** grpcio, grpcio-tools, protobuf (Python), pytest, existing privateboost core
+**Tech Stack:** grpcio, grpcio-tools, protobuf (Python), Docker, pytest, existing privateboost core
+
+**Design docs:**
+- `docs/plans/2026-02-26-grpc-implementation-design.md` — proto schema, RPCs, protocol flow
+- `docs/plans/2026-02-26-docker-simulation-design.md` — containers, env config, simulation
 
 ---
 
@@ -49,8 +53,12 @@ git commit -m "Add gRPC and protobuf dependencies"
 
 **Files:**
 - Create: `proto/privateboost.proto`
+- Create: `src/privateboost/grpc/__init__.py`
+- Modify: `Makefile`
 
 **Step 1: Create the proto file**
+
+Key difference from original gRPC design: `GetStatsSumResponse` and `GetGradientsSumResponse` have NO `x_coord` field. Shareholders are pure storage — aggregator assigns x_coords.
 
 ```protobuf
 syntax = "proto3";
@@ -139,8 +147,7 @@ message GetStatsSumRequest {
   repeated bytes commitments = 2;
 }
 message GetStatsSumResponse {
-  int32 x_coord = 1;
-  NdArray sum = 2;
+  NdArray sum = 1;
 }
 
 message GetGradientsSumRequest {
@@ -151,8 +158,7 @@ message GetGradientsSumRequest {
   int32 node_id = 5;
 }
 message GetGradientsSumResponse {
-  int32 x_coord = 1;
-  NdArray sum = 2;
+  NdArray sum = 1;
 }
 
 message CancelSessionRequest {
@@ -293,7 +299,11 @@ message LeafNode {
 }
 ```
 
-**Step 2: Generate Python stubs**
+**Step 2: Create the grpc package directory**
+
+Create `src/privateboost/grpc/__init__.py` as an empty file.
+
+**Step 3: Generate Python stubs**
 
 Run:
 ```bash
@@ -305,16 +315,14 @@ uv run python -m grpc_tools.protoc \
   proto/privateboost.proto
 ```
 
-Create `src/privateboost/grpc/__init__.py` as an empty file.
-
 Expected: `privateboost_pb2.py`, `privateboost_pb2.pyi`, `privateboost_pb2_grpc.py` are generated in `src/privateboost/grpc/`.
 
-**Step 3: Verify the generated code imports cleanly**
+**Step 4: Verify the generated code imports cleanly**
 
 Run: `uv run python -c "from privateboost.grpc import privateboost_pb2, privateboost_pb2_grpc; print('OK')"`
 Expected: `OK`
 
-**Step 4: Add a Makefile target for proto generation**
+**Step 5: Add a Makefile target for proto generation**
 
 Add to `Makefile`:
 ```makefile
@@ -327,7 +335,7 @@ proto:
 		proto/privateboost.proto
 ```
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add proto/ src/privateboost/grpc/ Makefile
@@ -336,13 +344,13 @@ git commit -m "Add protobuf schema and generate Python stubs"
 
 ---
 
-### Task 3: Serialization helpers (NdArray, Share, BinConfiguration, SplitDecision, Model)
+### Task 3: Serialization helpers
 
 **Files:**
 - Create: `src/privateboost/grpc/converters.py`
 - Create: `tests/test_grpc_converters.py`
 
-These convert between Python dataclasses/numpy and protobuf messages. Every other gRPC task depends on these, so we test them thoroughly first.
+Converts between Python dataclasses/numpy and protobuf messages. Every other gRPC task depends on these.
 
 **Step 1: Write the failing tests**
 
@@ -610,9 +618,9 @@ git commit -m "Add protobuf <-> Python serialization converters with tests"
 - Create: `src/privateboost/grpc/shareholder_server.py`
 - Create: `tests/test_grpc_shareholder.py`
 
-The server wraps the existing `ShareHolder` class. It manages multiple sessions, each backed by its own `ShareHolder` instance. Sessions are implicitly created on first `SubmitStats`.
+The server wraps `ShareHolder`. No `x_coord` parameter — shareholders are pure storage. Sessions are implicitly created on first `SubmitStats`.
 
-**Step 1: Write the failing test**
+**Step 1: Write the failing tests**
 
 ```python
 """Tests for ShareholderService gRPC server."""
@@ -630,9 +638,8 @@ from privateboost.grpc.shareholder_server import ShareholderServicer
 
 @pytest.fixture()
 def shareholder_channel():
-    """Start a ShareholderService gRPC server and return a channel to it."""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-    servicer = ShareholderServicer(x_coord=1, min_clients=2)
+    servicer = ShareholderServicer(min_clients=2)
     pb_grpc.add_ShareholderServiceServicer_to_server(servicer, server)
     port = server.add_insecure_port("[::]:0")
     server.start()
@@ -686,7 +693,6 @@ def test_stats_sum(shareholder_channel):
     resp = stub.GetStatsSum(pb.GetStatsSumRequest(
         session_id=session_id, commitments=[commitment_a, commitment_b],
     ))
-    assert resp.x_coord == 1
     result = pb_to_ndarray(resp.sum)
     expected = shares_a[0].y + shares_b[0].y
     np.testing.assert_array_almost_equal(result, expected)
@@ -751,7 +757,7 @@ def test_session_isolation(shareholder_channel):
 **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/test_grpc_shareholder.py -v`
-Expected: FAIL — `ImportError: cannot import name 'ShareholderServicer' from 'privateboost.grpc.shareholder_server'`
+Expected: FAIL — `ImportError`
 
 **Step 3: Implement the ShareholderServicer**
 
@@ -766,7 +772,6 @@ from typing import Dict
 import grpc
 import numpy as np
 
-from privateboost.crypto import Share
 from privateboost.messages import CommittedGradientShare, CommittedStatsShare
 from privateboost.shareholder import ShareHolder
 
@@ -775,10 +780,13 @@ from .converters import ndarray_to_pb, pb_to_share
 
 
 class ShareholderServicer(pb_grpc.ShareholderServiceServicer):
-    """gRPC servicer wrapping ShareHolder instances, one per session."""
+    """gRPC servicer wrapping ShareHolder instances, one per session.
 
-    def __init__(self, x_coord: int, min_clients: int = 10):
-        self._x_coord = x_coord
+    Shareholders have no identity (no x_coord). They are pure storage
+    engines. The aggregator assigns x_coords from its own config.
+    """
+
+    def __init__(self, min_clients: int = 10):
         self._min_clients = min_clients
         self._sessions: Dict[str, ShareHolder] = {}
         self._cancelled: set[str] = set()
@@ -791,9 +799,7 @@ class ShareholderServicer(pb_grpc.ShareholderServiceServicer):
                 return None
             if session_id not in self._sessions:
                 self._sessions[session_id] = ShareHolder(
-                    party_id=0,
-                    x_coord=self._x_coord,
-                    min_clients=self._min_clients,
+                    party_id=0, x_coord=0, min_clients=self._min_clients,
                 )
             return self._sessions[session_id]
 
@@ -808,7 +814,7 @@ class ShareholderServicer(pb_grpc.ShareholderServiceServicer):
                 return None
             return sh
 
-    def SubmitStats(self, request: pb.SubmitStatsRequest, context: grpc.ServicerContext) -> pb.SubmitStatsResponse:
+    def SubmitStats(self, request, context):
         sh = self._get_or_create_session(request.session_id, context)
         if sh is None:
             return pb.SubmitStatsResponse()
@@ -816,78 +822,78 @@ class ShareholderServicer(pb_grpc.ShareholderServiceServicer):
         sh.receive_stats(CommittedStatsShare(commitment=request.commitment, share=share))
         return pb.SubmitStatsResponse()
 
-    def SubmitGradients(self, request: pb.SubmitGradientsRequest, context: grpc.ServicerContext) -> pb.SubmitGradientsResponse:
+    def SubmitGradients(self, request, context):
         sh = self._get_or_create_session(request.session_id, context)
         if sh is None:
             return pb.SubmitGradientsResponse()
         share = pb_to_share(request.share)
         sh.receive_gradients(CommittedGradientShare(
-            round_id=request.round_id,
-            depth=request.depth,
-            commitment=request.commitment,
-            share=share,
-            node_id=request.node_id,
+            round_id=request.round_id, depth=request.depth,
+            commitment=request.commitment, share=share, node_id=request.node_id,
         ))
         return pb.SubmitGradientsResponse()
 
-    def GetStatsCommitments(self, request: pb.GetStatsCommitmentsRequest, context: grpc.ServicerContext) -> pb.GetStatsCommitmentsResponse:
+    def GetStatsCommitments(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.GetStatsCommitmentsResponse()
-        commitments = sh.get_stats_commitments()
-        return pb.GetStatsCommitmentsResponse(commitments=list(commitments))
+        return pb.GetStatsCommitmentsResponse(commitments=list(sh.get_stats_commitments()))
 
-    def GetGradientCommitments(self, request: pb.GetGradientCommitmentsRequest, context: grpc.ServicerContext) -> pb.GetGradientCommitmentsResponse:
+    def GetGradientCommitments(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.GetGradientCommitmentsResponse()
-        commitments = sh.get_gradient_commitments(request.depth)
-        return pb.GetGradientCommitmentsResponse(commitments=list(commitments))
+        return pb.GetGradientCommitmentsResponse(
+            commitments=list(sh.get_gradient_commitments(request.depth))
+        )
 
-    def GetGradientNodeIds(self, request: pb.GetGradientNodeIdsRequest, context: grpc.ServicerContext) -> pb.GetGradientNodeIdsResponse:
+    def GetGradientNodeIds(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.GetGradientNodeIdsResponse()
-        node_ids = sh.get_gradient_node_ids(request.depth)
-        return pb.GetGradientNodeIdsResponse(node_ids=list(node_ids))
+        return pb.GetGradientNodeIdsResponse(
+            node_ids=list(sh.get_gradient_node_ids(request.depth))
+        )
 
-    def GetStatsSum(self, request: pb.GetStatsSumRequest, context: grpc.ServicerContext) -> pb.GetStatsSumResponse:
+    def GetStatsSum(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.GetStatsSumResponse()
         try:
-            x_coord, total = sh.get_stats_sum(list(request.commitments))
+            _x_coord, total = sh.get_stats_sum(list(request.commitments))
         except ValueError as e:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(e))
             return pb.GetStatsSumResponse()
-        return pb.GetStatsSumResponse(x_coord=x_coord, sum=ndarray_to_pb(total))
+        return pb.GetStatsSumResponse(sum=ndarray_to_pb(total))
 
-    def GetGradientsSum(self, request: pb.GetGradientsSumRequest, context: grpc.ServicerContext) -> pb.GetGradientsSumResponse:
+    def GetGradientsSum(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.GetGradientsSumResponse()
         try:
-            x_coord, total = sh.get_gradients_sum(
+            _x_coord, total = sh.get_gradients_sum(
                 request.depth, list(request.commitments), request.node_id,
             )
         except ValueError as e:
             context.abort(grpc.StatusCode.FAILED_PRECONDITION, str(e))
             return pb.GetGradientsSumResponse()
-        return pb.GetGradientsSumResponse(x_coord=x_coord, sum=ndarray_to_pb(total))
+        return pb.GetGradientsSumResponse(sum=ndarray_to_pb(total))
 
-    def CancelSession(self, request: pb.CancelSessionRequest, context: grpc.ServicerContext) -> pb.CancelSessionResponse:
+    def CancelSession(self, request, context):
         with self._lock:
             self._cancelled.add(request.session_id)
             self._sessions.pop(request.session_id, None)
         return pb.CancelSessionResponse()
 
-    def Reset(self, request: pb.ResetRequest, context: grpc.ServicerContext) -> pb.ResetResponse:
+    def Reset(self, request, context):
         sh = self._get_session(request.session_id, context)
         if sh is None:
             return pb.ResetResponse()
         sh.reset()
         return pb.ResetResponse()
 ```
+
+Note: `ShareHolder` still requires `x_coord` in its constructor (it returns `(x_coord, sum)` from `get_stats_sum`). We pass `x_coord=0` since the gRPC response discards it. The aggregator attaches the real x_coord from its own mapping.
 
 **Step 4: Run tests to verify they pass**
 
@@ -903,19 +909,15 @@ git commit -m "Add ShareholderService gRPC server with session management"
 
 ---
 
-### Task 5: AggregatorService gRPC server
+### Task 5: AggregatorService gRPC server with RemoteShareHolder
 
 **Files:**
 - Create: `src/privateboost/grpc/aggregator_server.py`
 - Create: `tests/test_grpc_aggregator.py`
 
-The aggregator server wraps the existing `Aggregator` class. It maintains session state (phase, round_id, depth) and runs the training loop in a background thread. The `Aggregator` currently takes `ShareHolder` instances directly — the gRPC server instead uses shareholder stubs to call remote shareholders.
+The key piece: `RemoteShareHolder` adapts gRPC calls to the `ShareHolder` interface so the existing `Aggregator` class works unchanged. The aggregator assigns x_coords from its ordered shareholder list — when it gets a sum back from a shareholder, it attaches the x_coord from its own mapping.
 
-This task has two parts:
-1. A `RemoteShareHolder` adapter that implements the same interface as `ShareHolder` but calls gRPC
-2. The `AggregatorServicer` itself
-
-**Step 1: Write the failing test**
+**Step 1: Write the failing tests**
 
 ```python
 """Tests for AggregatorService gRPC server."""
@@ -928,13 +930,11 @@ from concurrent import futures
 from privateboost.grpc import privateboost_pb2 as pb, privateboost_pb2_grpc as pb_grpc
 from privateboost.grpc.shareholder_server import ShareholderServicer
 from privateboost.grpc.aggregator_server import AggregatorServicer
-from privateboost.grpc.converters import share_to_pb
-from privateboost.crypto import share
 
 
-def _start_shareholder(x_coord: int, min_clients: int = 2) -> tuple[grpc.Server, str]:
+def _start_shareholder(min_clients: int = 2) -> tuple[grpc.Server, str]:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-    servicer = ShareholderServicer(x_coord=x_coord, min_clients=min_clients)
+    servicer = ShareholderServicer(min_clients=min_clients)
     pb_grpc.add_ShareholderServiceServicer_to_server(servicer, server)
     port = server.add_insecure_port("[::]:0")
     server.start()
@@ -943,18 +943,16 @@ def _start_shareholder(x_coord: int, min_clients: int = 2) -> tuple[grpc.Server,
 
 @pytest.fixture()
 def grpc_cluster():
-    """Start 3 shareholder servers and 1 aggregator server."""
     sh_servers = []
     sh_addresses = []
-    for i in range(3):
-        server, addr = _start_shareholder(x_coord=i + 1, min_clients=2)
+    for _ in range(3):
+        server, addr = _start_shareholder(min_clients=2)
         sh_servers.append(server)
         sh_addresses.append(addr)
 
     agg_server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
     servicer = AggregatorServicer(
         shareholder_addresses=sh_addresses,
-        shareholder_x_coords=[1, 2, 3],
         n_bins=5,
         threshold=2,
         min_clients=2,
@@ -984,24 +982,24 @@ def grpc_cluster():
 def test_join_session(grpc_cluster):
     agg_channel, sh_addresses = grpc_cluster
     stub = pb_grpc.AggregatorServiceStub(agg_channel)
-    session_id = "test-session"
 
-    resp = stub.JoinSession(pb.JoinSessionRequest(session_id=session_id))
-    assert resp.session_id == session_id
+    resp = stub.JoinSession(pb.JoinSessionRequest(session_id="test-session"))
+    assert resp.session_id == "test-session"
     assert len(resp.shareholders) == 3
     assert resp.threshold == 2
     assert resp.config.n_bins == 5
     assert resp.config.n_trees == 2
     assert resp.config.loss == "squared"
+    # x_coords assigned by aggregator: 1, 2, 3
+    assert [sh.x_coord for sh in resp.shareholders] == [1, 2, 3]
 
 
 def test_initial_round_state(grpc_cluster):
     agg_channel, _ = grpc_cluster
     stub = pb_grpc.AggregatorServiceStub(agg_channel)
-    session_id = "test-session-state"
 
-    stub.JoinSession(pb.JoinSessionRequest(session_id=session_id))
-    resp = stub.GetRoundState(pb.GetRoundStateRequest(session_id=session_id))
+    stub.JoinSession(pb.JoinSessionRequest(session_id="test-state"))
+    resp = stub.GetRoundState(pb.GetRoundStateRequest(session_id="test-state"))
     assert resp.phase == pb.WAITING_FOR_CLIENTS
     assert resp.round_id == 0
     assert resp.depth == 0
@@ -1014,14 +1012,13 @@ Expected: FAIL — `ImportError`
 
 **Step 3: Implement the AggregatorServicer**
 
-Create `src/privateboost/grpc/aggregator_server.py`. This is the largest piece — it wraps `Aggregator` and manages session state.
-
-The `RemoteShareHolder` adapter converts `ShareHolder` method calls into gRPC RPCs. It implements enough of the `ShareHolder` interface that `Aggregator` can use it directly (the aggregator-facing methods: `get_stats_commitments`, `get_gradient_commitments`, `get_gradient_node_ids`, `get_stats_sum`, `get_gradients_sum`).
+Create `src/privateboost/grpc/aggregator_server.py`:
 
 ```python
 """gRPC server implementation for AggregatorService."""
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Tuple
 
@@ -1044,8 +1041,8 @@ from .converters import (
 class RemoteShareHolder:
     """Adapter: calls a remote ShareholderService via gRPC.
 
-    Implements the aggregator-facing subset of the ShareHolder interface
-    so that the existing Aggregator class can use it unchanged.
+    Implements the aggregator-facing subset of the ShareHolder interface.
+    The aggregator assigns x_coord — the remote shareholder doesn't know it.
     """
 
     def __init__(self, address: str, x_coord: int, session_id: str):
@@ -1082,7 +1079,7 @@ class RemoteShareHolder:
                 session_id=self._session_id, commitments=commitments,
             )
         )
-        return (resp.x_coord, pb_to_ndarray(resp.sum))
+        return (self.x_coord, pb_to_ndarray(resp.sum))
 
     def get_gradients_sum(
         self, depth: int, commitments: List[bytes], node_id: int,
@@ -1096,7 +1093,7 @@ class RemoteShareHolder:
                 node_id=node_id,
             )
         )
-        return (resp.x_coord, pb_to_ndarray(resp.sum))
+        return (self.x_coord, pb_to_ndarray(resp.sum))
 
     def close(self):
         self._channel.close()
@@ -1104,7 +1101,7 @@ class RemoteShareHolder:
 
 @dataclass
 class SessionState:
-    phase: pb.Phase = pb.WAITING_FOR_CLIENTS
+    phase: int = 0  # pb.WAITING_FOR_CLIENTS
     round_id: int = 0
     depth: int = 0
     aggregator: Aggregator | None = None
@@ -1113,12 +1110,15 @@ class SessionState:
 
 
 class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
-    """gRPC servicer for the Aggregator."""
+    """gRPC servicer for the Aggregator.
+
+    Assigns x_coords (1, 2, 3, ...) to shareholders based on their
+    position in the shareholder_addresses list.
+    """
 
     def __init__(
         self,
         shareholder_addresses: list[str],
-        shareholder_x_coords: list[int],
         n_bins: int = 10,
         threshold: int = 2,
         min_clients: int = 10,
@@ -1133,7 +1133,6 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
         target_column: str = "target",
     ):
         self._sh_addresses = shareholder_addresses
-        self._sh_x_coords = shareholder_x_coords
         self._n_bins = n_bins
         self._threshold = threshold
         self._min_clients = min_clients
@@ -1153,8 +1152,8 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
         with self._lock:
             if session_id not in self._sessions:
                 remote_shs = [
-                    RemoteShareHolder(addr, x_coord, session_id)
-                    for addr, x_coord in zip(self._sh_addresses, self._sh_x_coords)
+                    RemoteShareHolder(addr, x_coord=i + 1, session_id=session_id)
+                    for i, addr in enumerate(self._sh_addresses)
                 ]
                 aggregator = Aggregator(
                     shareholders=remote_shs,
@@ -1186,7 +1185,7 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
         agg = state.aggregator
         target = self._target_count or self._min_clients
 
-        # Wait for enough stats submissions
+        # Wait for enough stats
         while True:
             try:
                 commitments = agg._shareholders[0].get_stats_commitments()
@@ -1194,13 +1193,10 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                     break
             except Exception:
                 pass
-            import time
             time.sleep(0.1)
 
-        # Define bins
         agg.define_bins()
 
-        # Training loop
         for round_id in range(self._n_trees):
             with self._lock:
                 state.phase = pb.COLLECTING_GRADIENTS
@@ -1211,7 +1207,6 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                 with self._lock:
                     state.depth = depth
 
-                # Wait for enough gradient submissions
                 while True:
                     try:
                         commitments = agg._shareholders[0].get_gradient_commitments(depth)
@@ -1219,7 +1214,6 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                             break
                     except Exception:
                         pass
-                    import time
                     time.sleep(0.1)
 
                 if not agg.compute_splits(depth=depth, min_samples=1):
@@ -1230,12 +1224,12 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
         with self._lock:
             state.phase = pb.TRAINING_COMPLETE
 
-    def JoinSession(self, request: pb.JoinSessionRequest, context: grpc.ServicerContext) -> pb.JoinSessionResponse:
+    def JoinSession(self, request, context):
         state = self._get_or_create_session(request.session_id)
 
         shareholders = [
-            pb.ShareholderInfo(id=str(i), address=addr, x_coord=x)
-            for i, (addr, x) in enumerate(zip(self._sh_addresses, self._sh_x_coords))
+            pb.ShareholderInfo(id=str(i), address=addr, x_coord=i + 1)
+            for i, addr in enumerate(self._sh_addresses)
         ]
 
         config = pb.TrainingConfig(
@@ -1254,7 +1248,6 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
         elif self._target_fraction is not None:
             config.target_fraction = self._target_fraction
 
-        # Start training loop on first join
         if state.training_thread is None:
             state.training_thread = threading.Thread(
                 target=self._run_training, args=(request.session_id,), daemon=True,
@@ -1268,18 +1261,16 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
             config=config,
         )
 
-    def GetRoundState(self, request: pb.GetRoundStateRequest, context: grpc.ServicerContext) -> pb.GetRoundStateResponse:
+    def GetRoundState(self, request, context):
         state = self._get_session(request.session_id, context)
         if state is None:
             return pb.GetRoundStateResponse()
         with self._lock:
             return pb.GetRoundStateResponse(
-                phase=state.phase,
-                round_id=state.round_id,
-                depth=state.depth,
+                phase=state.phase, round_id=state.round_id, depth=state.depth,
             )
 
-    def GetTrainingState(self, request: pb.GetTrainingStateRequest, context: grpc.ServicerContext) -> pb.GetTrainingStateResponse:
+    def GetTrainingState(self, request, context):
         state = self._get_session(request.session_id, context)
         if state is None:
             return pb.GetTrainingStateResponse()
@@ -1288,21 +1279,20 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
             return pb.GetTrainingStateResponse(
                 model=model_to_pb(agg.model),
                 current_splits={
-                    nid: split_decision_to_pb(sd)
-                    for nid, sd in agg.splits.items()
+                    nid: split_decision_to_pb(sd) for nid, sd in agg.splits.items()
                 },
                 bins=[bin_config_to_pb(bc) for bc in agg._bin_configs],
                 round_id=state.round_id,
                 depth=state.depth,
             )
 
-    def GetModel(self, request: pb.GetModelRequest, context: grpc.ServicerContext) -> pb.GetModelResponse:
+    def GetModel(self, request, context):
         state = self._get_session(request.session_id, context)
         if state is None:
             return pb.GetModelResponse()
         return pb.GetModelResponse(model=model_to_pb(state.aggregator.model))
 
-    def CancelSession(self, request: pb.CancelSessionRequest, context: grpc.ServicerContext) -> pb.CancelSessionResponse:
+    def CancelSession(self, request, context):
         with self._lock:
             state = self._sessions.pop(request.session_id, None)
         if state is not None:
@@ -1316,6 +1306,8 @@ class AggregatorServicer(pb_grpc.AggregatorServiceServicer):
                 rsh.close()
         return pb.CancelSessionResponse()
 ```
+
+Key detail: `RemoteShareHolder.get_stats_sum()` returns `(self.x_coord, sum)` — the x_coord comes from the aggregator's assignment, not from the shareholder's response. This is how the aggregator controls identity.
 
 **Step 4: Run tests to verify they pass**
 
@@ -1337,7 +1329,7 @@ git commit -m "Add AggregatorService gRPC server with RemoteShareHolder adapter"
 - Create: `src/privateboost/grpc/network_client.py`
 - Create: `tests/test_grpc_network_client.py`
 
-The `NetworkClient` replaces the in-process `Client`. It talks to shareholders via gRPC for share submission and to the aggregator for session management / training state. It reuses the existing crypto and gradient computation logic.
+Replaces the in-process `Client` with gRPC calls to shareholders.
 
 **Step 1: Write the failing test**
 
@@ -1354,24 +1346,24 @@ from privateboost.grpc.shareholder_server import ShareholderServicer
 from privateboost.grpc.network_client import NetworkClient
 
 
-def _start_shareholder(x_coord: int, min_clients: int = 2) -> tuple[grpc.Server, str, int]:
+def _start_shareholder(min_clients: int = 2) -> tuple[grpc.Server, str]:
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-    servicer = ShareholderServicer(x_coord=x_coord, min_clients=min_clients)
+    servicer = ShareholderServicer(min_clients=min_clients)
     pb_grpc.add_ShareholderServiceServicer_to_server(servicer, server)
     port = server.add_insecure_port("[::]:0")
     server.start()
-    return server, f"localhost:{port}", x_coord
+    return server, f"localhost:{port}"
 
 
 @pytest.fixture()
 def shareholder_cluster():
     servers = []
-    infos = []
-    for i in range(3):
-        server, addr, x_coord = _start_shareholder(x_coord=i + 1, min_clients=2)
+    addresses = []
+    for _ in range(3):
+        server, addr = _start_shareholder(min_clients=2)
         servers.append(server)
-        infos.append((addr, x_coord))
-    yield infos
+        addresses.append(addr)
+    yield addresses
     for s in servers:
         s.stop(grace=0)
 
@@ -1383,15 +1375,13 @@ def test_network_client_submit_stats(shareholder_cluster):
         features=np.array([1.0, 2.0]),
         target=1.0,
         session_id=session_id,
-        shareholder_addresses=[addr for addr, _ in shareholder_cluster],
-        shareholder_x_coords=[x for _, x in shareholder_cluster],
+        shareholder_addresses=shareholder_cluster,
         threshold=2,
     )
 
     client.submit_stats()
 
-    # Verify shares were received by querying a shareholder directly
-    channel = grpc.insecure_channel(shareholder_cluster[0][0])
+    channel = grpc.insecure_channel(shareholder_cluster[0])
     stub = pb_grpc.ShareholderServiceStub(channel)
     resp = stub.GetStatsCommitments(pb.GetStatsCommitmentsRequest(session_id=session_id))
     assert len(resp.commitments) == 1
@@ -1436,7 +1426,6 @@ class NetworkClient:
         target: float,
         session_id: str,
         shareholder_addresses: list[str],
-        shareholder_x_coords: list[int],
         threshold: int = 2,
     ):
         self.client_id = client_id
@@ -1446,12 +1435,8 @@ class NetworkClient:
         self.threshold = threshold
         self._n_parties = len(shareholder_addresses)
 
-        self._channels = [
-            grpc.insecure_channel(addr) for addr in shareholder_addresses
-        ]
-        self._stubs = [
-            pb_grpc.ShareholderServiceStub(ch) for ch in self._channels
-        ]
+        self._channels = [grpc.insecure_channel(addr) for addr in shareholder_addresses]
+        self._stubs = [pb_grpc.ShareholderServiceStub(ch) for ch in self._channels]
 
     def _stats_commitment(self) -> bytes:
         h = hashlib.sha256()
@@ -1496,17 +1481,14 @@ class NetworkClient:
 
         all_gradients = []
         all_hessians = []
-
         for config in bins:
             value = self.features[config.feature_idx]
             n_total_bins = config.n_bins + 2
             bin_idx = _find_bin_index(value, config.edges, n_total_bins)
-
             g_vec = np.zeros(n_total_bins)
             h_vec = np.zeros(n_total_bins)
             g_vec[bin_idx] = gradient
             h_vec[bin_idx] = hessian
-
             all_gradients.append(g_vec)
             all_hessians.append(h_vec)
 
@@ -1554,12 +1536,12 @@ git commit -m "Add NetworkClient for gRPC-based share submission"
 
 ---
 
-### Task 7: End-to-end integration test over gRPC
+### Task 7: End-to-end gRPC integration test
 
 **Files:**
 - Create: `tests/test_grpc_integration.py`
 
-This is the key test. It mirrors `test_xgboost_heart_disease_shamir` from the existing integration tests, but runs the full protocol over gRPC: 3 shareholder servers, 1 aggregator server, many NetworkClients. Verifies the federated model achieves >75% accuracy, same as the in-process test.
+Mirrors `test_xgboost_heart_disease_shamir` but runs entirely over gRPC.
 
 **Step 1: Write the test**
 
@@ -1568,14 +1550,11 @@ This is the key test. It mirrors `test_xgboost_heart_disease_shamir` from the ex
 
 import time
 from concurrent import futures
-from typing import List
 
 import grpc
 import numpy as np
 import pandas as pd
 import pytest
-
-from privateboost.messages import BinConfiguration, SplitDecision
 
 from privateboost.grpc import privateboost_pb2 as pb, privateboost_pb2_grpc as pb_grpc
 from privateboost.grpc.shareholder_server import ShareholderServicer
@@ -1615,35 +1594,32 @@ def test_grpc_xgboost_heart_disease(heart_disease_df: pd.DataFrame):
 
     threshold = 2
     min_clients = 10
-    learning_rate = 0.15
-    lambda_reg = 2.0
     n_trees = 15
     max_depth = 3
     session_id = "integration-test"
 
     # Start 3 shareholder servers
-    sh_servers: list[grpc.Server] = []
-    sh_addresses: list[str] = []
-    for i in range(3):
+    sh_servers = []
+    sh_addresses = []
+    for _ in range(3):
         server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-        servicer = ShareholderServicer(x_coord=i + 1, min_clients=min_clients)
+        servicer = ShareholderServicer(min_clients=min_clients)
         pb_grpc.add_ShareholderServiceServicer_to_server(servicer, server)
         port = server.add_insecure_port("[::]:0")
         server.start()
         sh_servers.append(server)
         sh_addresses.append(f"localhost:{port}")
 
-    # Start aggregator server
+    # Start aggregator
     agg_server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))
-    feature_specs = [pb.FeatureSpec(index=i, name=name) for i, name in enumerate(FEATURES)]
+    feature_specs = [pb.FeatureSpec(index=i, name=n) for i, n in enumerate(FEATURES)]
     agg_servicer = AggregatorServicer(
         shareholder_addresses=sh_addresses,
-        shareholder_x_coords=[1, 2, 3],
         n_bins=10,
         threshold=threshold,
         min_clients=min_clients,
-        learning_rate=learning_rate,
-        lambda_reg=lambda_reg,
+        learning_rate=0.15,
+        lambda_reg=2.0,
         n_trees=n_trees,
         max_depth=max_depth,
         loss="squared",
@@ -1657,34 +1633,31 @@ def test_grpc_xgboost_heart_disease(heart_disease_df: pd.DataFrame):
     agg_channel = grpc.insecure_channel(f"localhost:{agg_port}")
     agg_stub = pb_grpc.AggregatorServiceStub(agg_channel)
 
+    clients = []
     try:
-        # Clients join and submit stats
-        join_resp = agg_stub.JoinSession(pb.JoinSessionRequest(session_id=session_id))
+        agg_stub.JoinSession(pb.JoinSessionRequest(session_id=session_id))
 
-        clients: list[NetworkClient] = []
         for idx, row in df_train.iterrows():
-            client = NetworkClient(
+            clients.append(NetworkClient(
                 client_id=f"client_{idx}",
                 features=row[FEATURES].values.astype(float),
                 target=float(row["target"]),
                 session_id=session_id,
                 shareholder_addresses=sh_addresses,
-                shareholder_x_coords=[1, 2, 3],
                 threshold=threshold,
-            )
-            clients.append(client)
+            ))
 
         for client in clients:
             client.submit_stats()
 
-        # Wait for bins to be computed
+        # Wait for bins
         while True:
             state = agg_stub.GetRoundState(pb.GetRoundStateRequest(session_id=session_id))
             if state.phase == pb.COLLECTING_GRADIENTS:
                 break
             time.sleep(0.2)
 
-        # Training loop: clients submit gradients for each round/depth
+        # Training loop
         current_round = -1
         current_depth = -1
         while True:
@@ -1699,27 +1672,25 @@ def test_grpc_xgboost_heart_disease(heart_disease_df: pd.DataFrame):
             current_round = state.round_id
             current_depth = state.depth
 
-            # Get training state
-            ts = agg_stub.GetTrainingState(pb.GetTrainingStateRequest(session_id=session_id))
+            ts = agg_stub.GetTrainingState(
+                pb.GetTrainingStateRequest(session_id=session_id)
+            )
             model = pb_to_model(ts.model)
             bins = [pb_to_bin_config(b) for b in ts.bins]
-            splits = {nid: pb_to_split_decision(sd) for nid, sd in ts.current_splits.items()}
+            splits = {
+                nid: pb_to_split_decision(sd) for nid, sd in ts.current_splits.items()
+            }
 
             for client in clients:
                 client.submit_gradients(
-                    bins=bins,
-                    model=model,
-                    splits=splits,
-                    round_id=current_round,
-                    depth=current_depth,
-                    loss="squared",
+                    bins=bins, model=model, splits=splits,
+                    round_id=current_round, depth=current_depth, loss="squared",
                 )
 
-        # Fetch final model
+        # Evaluate
         model_resp = agg_stub.GetModel(pb.GetModelRequest(session_id=session_id))
         final_model = pb_to_model(model_resp.model)
 
-        # Evaluate
         test_features = df_test[FEATURES].values.astype(float)
         test_targets = df_test["target"].values
         test_preds = final_model.predict(test_features)
@@ -1743,8 +1714,6 @@ def test_grpc_xgboost_heart_disease(heart_disease_df: pd.DataFrame):
 Run: `uv run pytest tests/test_grpc_integration.py -v -s`
 Expected: PASS with accuracy >75%.
 
-This test validates the entire gRPC stack end-to-end: serialization, shareholder server, aggregator server with background training loop, network client, and the full training protocol.
-
 **Step 3: Commit**
 
 ```bash
@@ -1754,15 +1723,416 @@ git commit -m "Add end-to-end gRPC integration test"
 
 ---
 
-### Task 8: Package exports and cleanup
+### Task 8: Server entrypoint module
+
+**Files:**
+- Create: `src/privateboost/grpc/serve.py`
+- Create: `src/privateboost/grpc/__main__.py`
+
+CLI entrypoint for running shareholder and aggregator servers. Used by Docker and for local development.
+
+**Step 1: Write a smoke test**
+
+```bash
+# Test that the module is importable and has the expected interface
+uv run python -c "from privateboost.grpc.serve import main; print('OK')"
+```
+
+**Step 2: Implement the serve module**
+
+Create `src/privateboost/grpc/serve.py`:
+
+```python
+"""CLI entrypoint for privateboost gRPC servers."""
+
+import os
+import sys
+import time
+from concurrent import futures
+
+import grpc
+
+from . import privateboost_pb2 as pb, privateboost_pb2_grpc as pb_grpc
+from .shareholder_server import ShareholderServicer
+from .aggregator_server import AggregatorServicer
+
+
+def _run_shareholder():
+    port = os.environ.get("PORT", "50051")
+    min_clients = int(os.environ.get("MIN_CLIENTS", "10"))
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    servicer = ShareholderServicer(min_clients=min_clients)
+    pb_grpc.add_ShareholderServiceServicer_to_server(servicer, server)
+    server.add_insecure_port(f"[::]:{port}")
+    server.start()
+    print(f"Shareholder server listening on port {port} (min_clients={min_clients})")
+    server.wait_for_termination()
+
+
+def _run_aggregator():
+    port = os.environ.get("PORT", "50052")
+    shareholders_str = os.environ.get("SHAREHOLDERS")
+    if not shareholders_str:
+        print("ERROR: SHAREHOLDERS env var is required (comma-separated host:port list)")
+        sys.exit(1)
+    shareholder_addresses = [s.strip() for s in shareholders_str.split(",")]
+
+    features_str = os.environ.get("FEATURES", "")
+    feature_specs = [
+        pb.FeatureSpec(index=i, name=name.strip())
+        for i, name in enumerate(features_str.split(","))
+        if name.strip()
+    ]
+
+    target_count_str = os.environ.get("TARGET_COUNT")
+    target_count = int(target_count_str) if target_count_str else None
+    target_fraction_str = os.environ.get("TARGET_FRACTION")
+    target_fraction = float(target_fraction_str) if target_fraction_str else None
+
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    servicer = AggregatorServicer(
+        shareholder_addresses=shareholder_addresses,
+        n_bins=int(os.environ.get("N_BINS", "10")),
+        threshold=int(os.environ.get("THRESHOLD", "2")),
+        min_clients=int(os.environ.get("MIN_CLIENTS", "10")),
+        learning_rate=float(os.environ.get("LEARNING_RATE", "0.15")),
+        lambda_reg=float(os.environ.get("LAMBDA_REG", "2.0")),
+        n_trees=int(os.environ.get("N_TREES", "15")),
+        max_depth=int(os.environ.get("MAX_DEPTH", "3")),
+        loss=os.environ.get("LOSS", "squared"),
+        target_count=target_count,
+        target_fraction=target_fraction,
+        features=feature_specs,
+        target_column=os.environ.get("TARGET_COLUMN", "target"),
+    )
+    pb_grpc.add_AggregatorServiceServicer_to_server(servicer, server)
+    server.add_insecure_port(f"[::]:{port}")
+    server.start()
+    print(f"Aggregator server listening on port {port}")
+    print(f"  Shareholders: {shareholder_addresses}")
+    print(f"  Threshold: {servicer._threshold}, Trees: {servicer._n_trees}, Depth: {servicer._max_depth}")
+    server.wait_for_termination()
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python -m privateboost.grpc.serve <shareholder|aggregator>")
+        sys.exit(1)
+
+    role = sys.argv[1]
+    if role == "shareholder":
+        _run_shareholder()
+    elif role == "aggregator":
+        _run_aggregator()
+    else:
+        print(f"Unknown role: {role}. Use 'shareholder' or 'aggregator'.")
+        sys.exit(1)
+```
+
+Create `src/privateboost/grpc/__main__.py`:
+
+```python
+from .serve import main
+
+main()
+```
+
+**Step 3: Test the entrypoint**
+
+Run: `uv run python -c "from privateboost.grpc.serve import main; print('OK')"`
+Expected: `OK`
+
+**Step 4: Commit**
+
+```bash
+git add src/privateboost/grpc/serve.py src/privateboost/grpc/__main__.py
+git commit -m "Add CLI entrypoint for shareholder and aggregator servers"
+```
+
+---
+
+### Task 9: Simulation script
+
+**Files:**
+- Create: `src/privateboost/grpc/simulate.py`
+
+Host-side script that runs the full protocol against Dockerized (or local) servers.
+
+**Step 1: Implement the simulation**
+
+Create `src/privateboost/grpc/simulate.py`:
+
+```python
+"""Simulation script: runs the full federated XGBoost protocol over gRPC."""
+
+import os
+import sys
+import time
+import uuid
+
+import grpc
+import numpy as np
+import pandas as pd
+
+from . import privateboost_pb2 as pb, privateboost_pb2_grpc as pb_grpc
+from .converters import pb_to_bin_config, pb_to_model, pb_to_split_decision
+from .network_client import NetworkClient
+
+FEATURES = [
+    "age", "sex", "cp", "trestbps", "chol", "fbs",
+    "restecg", "thalach", "exang", "oldpeak", "slope", "ca", "thal",
+]
+COLUMNS = [*FEATURES, "target"]
+
+
+def _load_heart_disease() -> pd.DataFrame:
+    url = "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"
+    df = pd.read_csv(url, names=COLUMNS, na_values="?")
+    df = df.dropna()
+    df["target"] = (df["target"] > 0).astype(int)
+    return df
+
+
+def main():
+    aggregator_addr = os.environ.get("AGGREGATOR", "localhost:50052")
+    session_id = os.environ.get("SESSION_ID", str(uuid.uuid4()))
+
+    print(f"Connecting to aggregator at {aggregator_addr}")
+    print(f"Session ID: {session_id}")
+
+    channel = grpc.insecure_channel(aggregator_addr)
+    stub = pb_grpc.AggregatorServiceStub(channel)
+
+    # Join session
+    join_resp = stub.JoinSession(pb.JoinSessionRequest(session_id=session_id))
+    sh_addresses = [sh.address for sh in join_resp.shareholders]
+    threshold = join_resp.threshold
+    config = join_resp.config
+    print(f"Joined session with {len(sh_addresses)} shareholders, threshold={threshold}")
+    print(f"Config: {config.n_trees} trees, depth {config.max_depth}, lr={config.learning_rate}")
+
+    # Load dataset
+    print("Loading Heart Disease dataset...")
+    df = _load_heart_disease()
+    np.random.seed(42)
+    df = df.sample(frac=1, random_state=42).reset_index(drop=True)
+    split_idx = int(len(df) * 0.8)
+    df_train = df.iloc[:split_idx]
+    df_test = df.iloc[split_idx:]
+    print(f"Train: {len(df_train)} samples, Test: {len(df_test)} samples")
+
+    # Create clients
+    clients = []
+    for idx, row in df_train.iterrows():
+        clients.append(NetworkClient(
+            client_id=f"client_{idx}",
+            features=row[FEATURES].values.astype(float),
+            target=float(row["target"]),
+            session_id=session_id,
+            shareholder_addresses=sh_addresses,
+            threshold=threshold,
+        ))
+
+    # Submit stats
+    print("Submitting statistics...")
+    for i, client in enumerate(clients):
+        client.submit_stats()
+        if (i + 1) % 50 == 0:
+            print(f"  {i + 1}/{len(clients)} clients submitted stats")
+    print(f"All {len(clients)} clients submitted stats")
+
+    # Wait for training to start
+    print("Waiting for aggregator to compute bins...")
+    while True:
+        state = stub.GetRoundState(pb.GetRoundStateRequest(session_id=session_id))
+        if state.phase == pb.COLLECTING_GRADIENTS:
+            break
+        time.sleep(0.5)
+    print("Bins computed, starting gradient rounds")
+
+    # Training loop
+    current_round = -1
+    current_depth = -1
+    while True:
+        state = stub.GetRoundState(pb.GetRoundStateRequest(session_id=session_id))
+        if state.phase == pb.TRAINING_COMPLETE:
+            break
+
+        if state.round_id == current_round and state.depth == current_depth:
+            time.sleep(0.1)
+            continue
+
+        current_round = state.round_id
+        current_depth = state.depth
+        print(f"  Round {current_round}, depth {current_depth}")
+
+        ts = stub.GetTrainingState(pb.GetTrainingStateRequest(session_id=session_id))
+        model = pb_to_model(ts.model)
+        bins = [pb_to_bin_config(b) for b in ts.bins]
+        splits = {nid: pb_to_split_decision(sd) for nid, sd in ts.current_splits.items()}
+
+        for client in clients:
+            client.submit_gradients(
+                bins=bins, model=model, splits=splits,
+                round_id=current_round, depth=current_depth,
+                loss=config.loss,
+            )
+
+    # Fetch final model
+    print("Training complete, fetching model...")
+    model_resp = stub.GetModel(pb.GetModelRequest(session_id=session_id))
+    final_model = pb_to_model(model_resp.model)
+    print(f"Model has {len(final_model.trees)} trees")
+
+    # Evaluate
+    test_features = df_test[FEATURES].values.astype(float)
+    test_targets = df_test["target"].values
+    test_preds = final_model.predict(test_features)
+    test_classes = (test_preds >= 0.5).astype(int)
+    accuracy = np.mean(test_classes == test_targets)
+
+    print(f"\nTest accuracy: {accuracy:.2%}")
+
+    # Cleanup
+    for client in clients:
+        client.close()
+    channel.close()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**Step 2: Verify it's importable**
+
+Run: `uv run python -c "from privateboost.grpc.simulate import main; print('OK')"`
+Expected: `OK`
+
+**Step 3: Commit**
+
+```bash
+git add src/privateboost/grpc/simulate.py
+git commit -m "Add simulation script for running protocol against gRPC servers"
+```
+
+---
+
+### Task 10: Dockerfile and docker-compose.yml
+
+**Files:**
+- Create: `Dockerfile`
+- Create: `docker-compose.yml`
+- Create: `.dockerignore`
+
+**Step 1: Create .dockerignore**
+
+```
+.git
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+*.egg-info
+docs/
+paper/
+slides/
+notebooks/
+```
+
+**Step 2: Create Dockerfile**
+
+```dockerfile
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+COPY src/ src/
+COPY proto/ proto/
+
+RUN pip install --no-cache-dir .
+
+ENTRYPOINT ["python", "-m", "privateboost.grpc.serve"]
+```
+
+**Step 3: Create docker-compose.yml**
+
+```yaml
+services:
+  shareholder-1:
+    build: .
+    command: shareholder
+    environment:
+      PORT: "50051"
+      MIN_CLIENTS: "${MIN_CLIENTS:-10}"
+
+  shareholder-2:
+    build: .
+    command: shareholder
+    environment:
+      PORT: "50051"
+      MIN_CLIENTS: "${MIN_CLIENTS:-10}"
+
+  shareholder-3:
+    build: .
+    command: shareholder
+    environment:
+      PORT: "50051"
+      MIN_CLIENTS: "${MIN_CLIENTS:-10}"
+
+  aggregator:
+    build: .
+    command: aggregator
+    ports:
+      - "${AGGREGATOR_PORT:-50052}:50052"
+    environment:
+      PORT: "50052"
+      SHAREHOLDERS: "shareholder-1:50051,shareholder-2:50051,shareholder-3:50051"
+      THRESHOLD: "${THRESHOLD:-2}"
+      N_BINS: "${N_BINS:-10}"
+      N_TREES: "${N_TREES:-15}"
+      MAX_DEPTH: "${MAX_DEPTH:-3}"
+      LEARNING_RATE: "${LEARNING_RATE:-0.15}"
+      LAMBDA_REG: "${LAMBDA_REG:-2.0}"
+      MIN_CLIENTS: "${MIN_CLIENTS:-10}"
+      LOSS: "${LOSS:-squared}"
+      FEATURES: "${FEATURES:-age,sex,cp,trestbps,chol,fbs,restecg,thalach,exang,oldpeak,slope,ca,thal}"
+      TARGET_COLUMN: "${TARGET_COLUMN:-target}"
+      TARGET_COUNT: "${TARGET_COUNT:-}"
+    depends_on:
+      - shareholder-1
+      - shareholder-2
+      - shareholder-3
+```
+
+**Step 4: Test Docker build**
+
+Run: `docker compose build`
+Expected: Image builds successfully.
+
+**Step 5: Test Docker startup**
+
+Run: `docker compose up -d && docker compose logs --tail=5`
+Expected: All 4 containers start. Shareholders print listening messages. Aggregator prints listening message with shareholder list.
+
+Run: `docker compose down`
+
+**Step 6: Commit**
+
+```bash
+git add Dockerfile docker-compose.yml .dockerignore
+git commit -m "Add Dockerfile and docker-compose.yml for shareholder and aggregator servers"
+```
+
+---
+
+### Task 11: Package exports and cleanup
 
 **Files:**
 - Modify: `src/privateboost/grpc/__init__.py`
-- Run: `make lint` and fix any issues
 
-**Step 1: Set up the grpc package exports**
-
-Update `src/privateboost/grpc/__init__.py`:
+**Step 1: Set up grpc package exports**
 
 ```python
 """gRPC servers and client for the privateboost protocol."""
@@ -1809,7 +2179,7 @@ Expected: No warnings or errors.
 **Step 3: Run full test suite**
 
 Run: `make test`
-Expected: All tests pass (existing + new gRPC tests).
+Expected: All tests pass.
 
 **Step 4: Commit**
 
@@ -1820,9 +2190,32 @@ git commit -m "Add gRPC package exports"
 
 ---
 
-### Task 9: Final verification
+### Task 12: Docker integration smoke test
 
-**Step 1: Run full build/test/lint cycle**
+**Step 1: Start the Docker cluster**
+
+Run: `docker compose up -d --build`
+Expected: All containers start.
+
+**Step 2: Run the simulation**
+
+Run: `uv run python -m privateboost.grpc.simulate`
+Expected: Full training completes, prints accuracy >75%.
+
+**Step 3: Test with different parameters**
+
+Run: `N_TREES=5 MAX_DEPTH=2 docker compose up -d && uv run python -m privateboost.grpc.simulate`
+Expected: Training completes with fewer trees.
+
+**Step 4: Clean up**
+
+Run: `docker compose down`
+
+---
+
+### Task 13: Final verification
+
+**Step 1: Run full build/test/lint**
 
 ```bash
 make test && make lint
@@ -1830,18 +2223,19 @@ make test && make lint
 
 Expected: All tests pass, zero lint warnings.
 
-**Step 2: Review the diff**
+**Step 2: Review the changeset**
 
 ```bash
 git diff main --stat
 ```
 
-Verify the changeset includes:
+Verify:
 - `pyproject.toml` — grpcio/protobuf deps
-- `proto/privateboost.proto` — protobuf schema
-- `src/privateboost/grpc/` — generated stubs + converters + servers + client
+- `proto/privateboost.proto` — protobuf schema (no x_coord in sum responses)
+- `src/privateboost/grpc/` — stubs, converters, servers, client, serve entrypoint, simulation
 - `tests/test_grpc_*.py` — converter, shareholder, aggregator, network client, integration tests
+- `Dockerfile`, `docker-compose.yml`, `.dockerignore` — container config
 - `Makefile` — proto target
-- `docs/plans/` — design + plan docs
+- `docs/plans/` — design docs + plan
 
-No changes to existing core files (`client.py`, `shareholder.py`, `aggregator.py`, `tree.py`, `messages.py`, `crypto/`).
+No changes to existing core files.
