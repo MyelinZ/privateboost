@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -32,6 +33,16 @@ impl RemoteShareHolder {
     pub fn set_round_id(&self, round_id: i32) {
         self.round_id.store(round_id, Ordering::Relaxed);
     }
+
+    pub async fn cancel_session(&self) -> Result<()> {
+        let mut client = self.client.lock().await;
+        client
+            .cancel_session(crate::proto::CancelSessionRequest {
+                session_id: self.session_id.clone(),
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 fn ndarray_to_vec(arr: &proto::NdArray) -> Vec<f64> {
@@ -44,6 +55,38 @@ fn ndarray_to_vec(arr: &proto::NdArray) -> Vec<f64> {
 fn bytes_to_commitment(b: &[u8]) -> Result<Commitment> {
     b.try_into()
         .map_err(|_| anyhow!("invalid commitment length"))
+}
+
+#[async_trait]
+impl ShareHolderClient for Arc<RemoteShareHolder> {
+    fn x_coord(&self) -> i32 {
+        (**self).x_coord()
+    }
+
+    async fn get_stats_commitments(&self) -> Result<HashSet<Commitment>> {
+        (**self).get_stats_commitments().await
+    }
+
+    async fn get_gradient_commitments(&self, depth: Depth) -> Result<HashSet<Commitment>> {
+        (**self).get_gradient_commitments(depth).await
+    }
+
+    async fn get_gradient_node_ids(&self, depth: Depth) -> Result<HashSet<NodeId>> {
+        (**self).get_gradient_node_ids(depth).await
+    }
+
+    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<f64>)> {
+        (**self).get_stats_sum(commitments).await
+    }
+
+    async fn get_gradients_sum(
+        &self,
+        depth: Depth,
+        commitments: &[Commitment],
+        node_id: NodeId,
+    ) -> Result<(i32, Vec<f64>)> {
+        (**self).get_gradients_sum(depth, commitments, node_id).await
+    }
 }
 
 #[async_trait]
