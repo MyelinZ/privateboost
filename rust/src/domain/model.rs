@@ -1,0 +1,100 @@
+pub type NodeId = i32;
+pub type Depth = i32;
+
+#[derive(Debug, Clone)]
+pub enum TreeNode {
+    Split(SplitNode),
+    Leaf(LeafNode),
+}
+
+#[derive(Debug, Clone)]
+pub struct SplitNode {
+    pub feature_idx: usize,
+    pub threshold: f64,
+    pub gain: f64,
+    pub left: Box<TreeNode>,
+    pub right: Box<TreeNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LeafNode {
+    pub value: f64,
+    pub n_samples: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tree {
+    pub root: TreeNode,
+}
+
+#[derive(Debug, Clone)]
+pub struct Model {
+    pub initial_prediction: f64,
+    pub learning_rate: f64,
+    pub trees: Vec<Tree>,
+}
+
+impl Model {
+    pub fn new(initial_prediction: f64, learning_rate: f64) -> Self {
+        Self {
+            initial_prediction,
+            learning_rate,
+            trees: Vec::new(),
+        }
+    }
+
+    pub fn add_tree(&mut self, tree: Tree) {
+        self.trees.push(tree);
+    }
+
+    /// Predict for a single sample.
+    pub fn predict_one(&self, features: &[f64]) -> f64 {
+        let mut pred = self.initial_prediction;
+        for tree in &self.trees {
+            pred += self.learning_rate * tree_predict(&tree.root, features);
+        }
+        pred
+    }
+}
+
+fn tree_predict(node: &TreeNode, features: &[f64]) -> f64 {
+    match node {
+        TreeNode::Leaf(leaf) => leaf.value,
+        TreeNode::Split(split) => {
+            if features[split.feature_idx] <= split.threshold {
+                tree_predict(&split.left, features)
+            } else {
+                tree_predict(&split.right, features)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BinConfiguration {
+    pub feature_idx: usize,
+    pub edges: Vec<f64>,
+    pub inner_edges: Vec<f64>,
+    pub n_bins: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct SplitDecision {
+    pub node_id: NodeId,
+    pub feature_idx: usize,
+    pub threshold: f64,
+    pub gain: f64,
+    pub left_child_id: NodeId,
+    pub right_child_id: NodeId,
+    pub g_left: f64,
+    pub h_left: f64,
+    pub g_right: f64,
+    pub h_right: f64,
+}
+
+/// Aggregated gradient/hessian totals for a node.
+#[derive(Debug, Clone)]
+pub struct NodeTotals {
+    pub gradient_sum: f64,
+    pub hessian_sum: f64,
+}
