@@ -28,3 +28,6 @@ paper/.claude/
 
 # Node
 node_modules/
+
+# Rust build artifacts
+rust/target/
