@@ -38,7 +38,7 @@ pub(crate) fn scalars_to_bytes(scalars: &[Scalar]) -> Vec<u8> {
 }
 
 pub(crate) fn bytes_to_scalars(data: &[u8]) -> Result<Vec<Scalar>, String> {
-    if !data.len().is_multiple_of(32) {
+    if data.len() % 32 != 0 {
         return Err("scalar data length not multiple of 32".into());
     }
     let mut scalars = Vec::with_capacity(data.len() / 32);

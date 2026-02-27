@@ -282,8 +282,9 @@ impl ShareHolder {
         let depth_data = self.gradients.get(&depth).unwrap_or(&empty_depth);
         let mut total: Option<Vec<Scalar>> = None;
         for commitment in commitments {
-            if let Some(client_nodes) = depth_data.get(commitment)
-                && let Some(s) = client_nodes.get(&node_id)
+            if let Some(s) = depth_data
+                .get(commitment)
+                .and_then(|client_nodes| client_nodes.get(&node_id))
             {
                 match &mut total {
                     None => total = Some(s.y.clone()),
