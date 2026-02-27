@@ -21,6 +21,11 @@ async-trait = "0.1"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+uuid = { version = "1", features = ["v4"] }
+
+[[bin]]
+name = "coordinator"
+path = "src/bin/coordinator.rs"
 
 [build-dependencies]
 tonic-build = "0.13"
