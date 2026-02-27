@@ -4,7 +4,14 @@ use anyhow::bail;
 
 use crate::crypto::commitment::Commitment;
 use crate::crypto::shamir::Share;
-use crate::domain::model::{Depth, NodeId};
+use crate::domain::model::{Depth, NodeId, StepId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VoteStatus {
+    Pending,
+    Consensus,
+    Disputed,
+}
 
 pub struct ShareHolder {
     pub min_clients: usize,
@@ -14,6 +21,9 @@ pub struct ShareHolder {
     gradients: HashMap<Depth, HashMap<Commitment, HashMap<NodeId, Share>>>,
     gradients_frozen: HashMap<(i32, i32), bool>,
     current_round_id: i32,
+    expected_aggregators: usize,
+    votes: HashMap<StepId, HashMap<i32, (Vec<u8>, Vec<u8>)>>,
+    consensus_results: HashMap<StepId, Vec<u8>>,
 }
 
 impl ShareHolder {
@@ -26,6 +36,9 @@ impl ShareHolder {
             gradients: HashMap::new(),
             gradients_frozen: HashMap::new(),
             current_round_id: -1,
+            expected_aggregators: 1,
+            votes: HashMap::new(),
+            consensus_results: HashMap::new(),
         }
     }
 
@@ -46,6 +59,10 @@ impl ShareHolder {
 
     pub fn current_round_id(&self) -> i32 {
         self.current_round_id
+    }
+
+    pub fn set_expected_aggregators(&mut self, n: usize) {
+        self.expected_aggregators = n;
     }
 
     pub fn receive_stats(&mut self, commitment: Commitment, share: Share) -> bool {
@@ -86,6 +103,49 @@ impl ShareHolder {
             self.gradients_frozen.insert((round_id, depth), true);
         }
         true
+    }
+
+    pub fn submit_vote(
+        &mut self,
+        step: StepId,
+        aggregator_id: i32,
+        result_hash: Vec<u8>,
+        result_data: Vec<u8>,
+    ) -> VoteStatus {
+        let step_votes = self.votes.entry(step).or_default();
+
+        if step_votes.contains_key(&aggregator_id) {
+            return VoteStatus::Pending;
+        }
+
+        step_votes.insert(aggregator_id, (result_hash, result_data));
+
+        if step_votes.len() >= self.expected_aggregators {
+            let mut hash_groups: HashMap<&Vec<u8>, (usize, &Vec<u8>)> = HashMap::new();
+            for (hash, data) in step_votes.values() {
+                let entry = hash_groups.entry(hash).or_insert((0, data));
+                entry.0 += 1;
+            }
+
+            let (max_count, winning_data) = hash_groups
+                .values()
+                .max_by_key(|(count, _)| *count)
+                .unwrap();
+
+            if *max_count > self.expected_aggregators / 2 {
+                self.consensus_results
+                    .insert(step, winning_data.to_vec());
+                VoteStatus::Consensus
+            } else {
+                VoteStatus::Disputed
+            }
+        } else {
+            VoteStatus::Pending
+        }
+    }
+
+    pub fn get_consensus(&self, step: StepId) -> Option<&Vec<u8>> {
+        self.consensus_results.get(&step)
     }
 
     pub fn get_stats_commitments(&self) -> HashSet<Commitment> {
@@ -337,5 +397,46 @@ mod tests {
         assert!(!sh.is_stats_frozen());
         assert!(sh.receive_stats([4u8; 32], make_share(1, &[5.0])));
         assert!(sh.is_stats_frozen());
+    }
+
+    // --- Task 5: Consensus voting tests ---
+
+    #[test]
+    fn test_consensus_majority() {
+        let mut sh = ShareHolder::new(1);
+        let step = StepId::stats();
+        let result_a = vec![1u8; 32]; // hash A
+        let result_b = vec![2u8; 32]; // hash B
+
+        sh.set_expected_aggregators(3);
+        assert_eq!(sh.submit_vote(step, 0, result_a.clone(), b"data_a".to_vec()), VoteStatus::Pending);
+        assert_eq!(sh.submit_vote(step, 1, result_b.clone(), b"data_b".to_vec()), VoteStatus::Pending);
+        assert_eq!(sh.submit_vote(step, 2, result_a.clone(), b"data_a".to_vec()), VoteStatus::Consensus);
+
+        let consensus = sh.get_consensus(step).unwrap();
+        assert_eq!(consensus, b"data_a");
+    }
+
+    #[test]
+    fn test_consensus_no_majority() {
+        let mut sh = ShareHolder::new(1);
+        let step = StepId::stats();
+        sh.set_expected_aggregators(3);
+        sh.submit_vote(step, 0, vec![1u8; 32], b"a".to_vec());
+        sh.submit_vote(step, 1, vec![2u8; 32], b"b".to_vec());
+        let status = sh.submit_vote(step, 2, vec![3u8; 32], b"c".to_vec());
+        assert_eq!(status, VoteStatus::Disputed);
+    }
+
+    #[test]
+    fn test_consensus_duplicate_aggregator() {
+        let mut sh = ShareHolder::new(1);
+        let step = StepId::stats();
+        sh.set_expected_aggregators(3);
+        assert_eq!(sh.submit_vote(step, 0, vec![1u8; 32], b"a".to_vec()), VoteStatus::Pending);
+        // Same aggregator_id again -- should be rejected (still Pending)
+        assert_eq!(sh.submit_vote(step, 0, vec![1u8; 32], b"a".to_vec()), VoteStatus::Pending);
+        // Still only 1 vote counted, no consensus
+        assert!(sh.get_consensus(step).is_none());
     }
 }
