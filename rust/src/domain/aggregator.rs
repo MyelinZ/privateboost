@@ -15,7 +15,7 @@ const MIN_HESSIAN_THRESHOLD: f64 = 0.1;
 /// Which type of commitments to fetch from a shareholder.
 pub enum CommitmentKind {
     Stats,
-    Gradient(Depth),
+    Gradient(i32, Depth),
 }
 
 /// Abstraction over shareholder communication.
@@ -26,11 +26,12 @@ pub enum CommitmentKind {
 pub trait ShareHolderClient: Send + Sync {
     fn x_coord(&self) -> i32;
     async fn get_stats_commitments(&self) -> Result<HashSet<Commitment>>;
-    async fn get_gradient_commitments(&self, depth: Depth) -> Result<HashSet<Commitment>>;
-    async fn get_gradient_node_ids(&self, depth: Depth) -> Result<HashSet<NodeId>>;
+    async fn get_gradient_commitments(&self, round_id: i32, depth: Depth) -> Result<HashSet<Commitment>>;
+    async fn get_gradient_node_ids(&self, round_id: i32, depth: Depth) -> Result<HashSet<NodeId>>;
     async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<Scalar>)>;
     async fn get_gradients_sum(
         &self,
+        round_id: i32,
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
@@ -49,6 +50,7 @@ pub struct Aggregator {
 }
 
 impl Aggregator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         shareholders: Vec<Box<dyn ShareHolderClient>>,
         n_bins: usize,
@@ -89,7 +91,7 @@ impl Aggregator {
         for (i, sh) in self.shareholders.iter().enumerate() {
             let commits = match &kind {
                 CommitmentKind::Stats => sh.get_stats_commitments().await?,
-                CommitmentKind::Gradient(depth) => sh.get_gradient_commitments(*depth).await?,
+                CommitmentKind::Gradient(round_id, depth) => sh.get_gradient_commitments(*round_id, *depth).await?,
             };
             sh_commitments.push((i, commits));
         }
@@ -143,6 +145,7 @@ impl Aggregator {
     async fn collect_gradient_shares(
         &self,
         selected_indices: &[usize],
+        round_id: i32,
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
@@ -150,7 +153,7 @@ impl Aggregator {
         let mut shares = Vec::new();
         for &idx in selected_indices {
             let sh = &self.shareholders[idx];
-            match sh.get_gradients_sum(depth, commitments, node_id).await {
+            match sh.get_gradients_sum(round_id, depth, commitments, node_id).await {
                 Ok((x, scalars)) => shares.push(Share { x, y: scalars }),
                 Err(e) => {
                     tracing::warn!(shareholder = sh.x_coord(), "gradients_sum failed: {e}");
@@ -221,8 +224,10 @@ impl Aggregator {
 
     /// For each active node at `depth`, reconstruct gradient histograms
     /// and find the best split. Returns `true` if any new splits were found.
+    #[allow(clippy::too_many_arguments)]
     pub async fn compute_splits(
         &self,
+        round_id: i32,
         depth: Depth,
         min_samples: usize,
         bin_configs: &[BinConfiguration],
@@ -234,18 +239,18 @@ impl Aggregator {
         let n_splits_before = splits.len();
 
         let (selected, commitments) = self
-            .select_shareholders(CommitmentKind::Gradient(depth))
+            .select_shareholders(CommitmentKind::Gradient(round_id, depth))
             .await?;
 
         let mut active_nodes: HashSet<NodeId> = HashSet::new();
         for &idx in &selected {
-            let nodes = self.shareholders[idx].get_gradient_node_ids(depth).await?;
+            let nodes = self.shareholders[idx].get_gradient_node_ids(round_id, depth).await?;
             active_nodes.extend(nodes);
         }
 
         for node_id in active_nodes {
             let shares = self
-                .collect_gradient_shares(&selected, depth, &commitments, node_id)
+                .collect_gradient_shares(&selected, round_id, depth, &commitments, node_id)
                 .await;
             if shares.len() < self.threshold {
                 continue;

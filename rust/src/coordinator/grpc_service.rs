@@ -71,6 +71,7 @@ impl proto::coordinator_service_server::CoordinatorService for CoordinatorGrpcSe
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn training_config_to_domain(config: &proto::TrainingConfig) -> Result<RunConfig, Status> {
     let target_count = match &config.target {
         Some(proto::training_config::Target::TargetCount(tc)) => *tc as usize,
@@ -89,6 +90,8 @@ fn training_config_to_domain(config: &proto::TrainingConfig) -> Result<RunConfig
         target_count,
         features: config.features.iter().map(|f| f.name.clone()).collect(),
         target_column: config.target_column.clone(),
+        feature_scales: config.features.iter().map(|f| f.scale).collect(),
+        gradient_scale: config.gradient_scale,
     })
 }
 
@@ -101,7 +104,7 @@ fn domain_to_training_config(config: &RunConfig) -> proto::TrainingConfig {
             .map(|(i, name)| proto::FeatureSpec {
                 index: i as i32,
                 name: name.clone(),
-                scale: 0.0,
+                scale: config.feature_scales.get(i).copied().unwrap_or(1.0),
             })
             .collect(),
         target_column: config.target_column.clone(),
@@ -115,6 +118,6 @@ fn domain_to_training_config(config: &RunConfig) -> proto::TrainingConfig {
         target: Some(proto::training_config::Target::TargetCount(
             config.target_count as i32,
         )),
-        gradient_scale: 0.0,
+        gradient_scale: config.gradient_scale,
     }
 }

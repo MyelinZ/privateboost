@@ -83,12 +83,12 @@ impl ShareHolderClient for Arc<RemoteShareHolder> {
         (**self).get_stats_commitments().await
     }
 
-    async fn get_gradient_commitments(&self, depth: Depth) -> Result<HashSet<Commitment>> {
-        (**self).get_gradient_commitments(depth).await
+    async fn get_gradient_commitments(&self, round_id: i32, depth: Depth) -> Result<HashSet<Commitment>> {
+        (**self).get_gradient_commitments(round_id, depth).await
     }
 
-    async fn get_gradient_node_ids(&self, depth: Depth) -> Result<HashSet<NodeId>> {
-        (**self).get_gradient_node_ids(depth).await
+    async fn get_gradient_node_ids(&self, round_id: i32, depth: Depth) -> Result<HashSet<NodeId>> {
+        (**self).get_gradient_node_ids(round_id, depth).await
     }
 
     async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<Scalar>)> {
@@ -97,11 +97,12 @@ impl ShareHolderClient for Arc<RemoteShareHolder> {
 
     async fn get_gradients_sum(
         &self,
+        round_id: i32,
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
     ) -> Result<(i32, Vec<Scalar>)> {
-        (**self).get_gradients_sum(depth, commitments, node_id).await
+        (**self).get_gradients_sum(round_id, depth, commitments, node_id).await
     }
 }
 
@@ -126,12 +127,12 @@ impl ShareHolderClient for RemoteShareHolder {
             .collect()
     }
 
-    async fn get_gradient_commitments(&self, depth: Depth) -> Result<HashSet<Commitment>> {
+    async fn get_gradient_commitments(&self, round_id: i32, depth: Depth) -> Result<HashSet<Commitment>> {
         let mut client = self.client.lock().await;
         let resp = client
             .get_gradient_commitments(proto::GetGradientCommitmentsRequest {
                 run_id: self.run_id.clone(),
-                round_id: 0,
+                round_id,
                 depth,
             })
             .await?
@@ -143,12 +144,12 @@ impl ShareHolderClient for RemoteShareHolder {
             .collect()
     }
 
-    async fn get_gradient_node_ids(&self, depth: Depth) -> Result<HashSet<NodeId>> {
+    async fn get_gradient_node_ids(&self, round_id: i32, depth: Depth) -> Result<HashSet<NodeId>> {
         let mut client = self.client.lock().await;
         let resp = client
             .get_gradient_node_ids(proto::GetGradientNodeIdsRequest {
                 run_id: self.run_id.clone(),
-                round_id: 0,
+                round_id,
                 depth,
             })
             .await?
@@ -181,6 +182,7 @@ impl ShareHolderClient for RemoteShareHolder {
 
     async fn get_gradients_sum(
         &self,
+        round_id: i32,
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
@@ -190,7 +192,7 @@ impl ShareHolderClient for RemoteShareHolder {
         let resp = client
             .get_gradients_sum(proto::GetGradientsSumRequest {
                 run_id: self.run_id.clone(),
-                round_id: 0,
+                round_id,
                 depth,
                 commitments: proto_commitments,
                 node_id,

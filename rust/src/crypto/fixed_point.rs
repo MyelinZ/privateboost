@@ -65,15 +65,15 @@ fn scalar_from_u128(val: u128) -> Scalar {
 
 /// Convert a Scalar to f64 by interpreting its LE bytes.
 ///
+/// Accumulates from MSB to LSB (Horner's method) for better numerical
+/// precision — adding large terms first minimizes rounding error.
 /// Lossy for values > 2^53, which is acceptable since we divide
 /// by scale after conversion.
 fn scalar_to_f64(s: &Scalar) -> f64 {
     let bytes = s.to_bytes();
     let mut result: f64 = 0.0;
-    let mut base: f64 = 1.0;
-    for &b in &bytes {
-        result += (b as f64) * base;
-        base *= 256.0;
+    for &b in bytes.iter().rev() {
+        result = result * 256.0 + b as f64;
     }
     result
 }
@@ -139,6 +139,61 @@ mod tests {
         let decoded = decode_vec(&result, scale);
         for (a, b) in values.iter().zip(decoded.iter()) {
             assert!((a - b).abs() < 1e-9, "expected {a}, got {b}");
+        }
+    }
+
+    /// Simulate multiple clients sharing values, shareholders summing,
+    /// and aggregator reconstructing the sum.
+    #[test]
+    fn test_multi_client_sum_pipeline() {
+        use crate::crypto::shamir;
+
+        let scale = 1e12;
+        let n_shareholders = 3;
+        let threshold = 2;
+
+        // Each client has a different value
+        let client_values: Vec<Vec<f64>> = vec![
+            vec![10.0, -5.0],
+            vec![20.0, 3.0],
+            vec![-15.0, 8.0],
+            vec![100.0, -50.0],
+            vec![0.5, 1.5],
+        ];
+
+        // Each client encodes and creates shares
+        let mut sh_sums: Vec<Vec<Scalar>> = vec![Vec::new(); n_shareholders];
+
+        for values in &client_values {
+            let encoded = encode_vec(values, scale);
+            let shares = shamir::share(&encoded, n_shareholders, threshold).unwrap();
+            for (i, share) in shares.iter().enumerate() {
+                if sh_sums[i].is_empty() {
+                    sh_sums[i] = share.y.clone();
+                } else {
+                    for (sum, val) in sh_sums[i].iter_mut().zip(share.y.iter()) {
+                        *sum += val;
+                    }
+                }
+            }
+        }
+
+        // Aggregator collects sum-shares and reconstructs
+        let sum_shares: Vec<shamir::Share> = sh_sums
+            .into_iter()
+            .enumerate()
+            .map(|(i, y)| shamir::Share { x: (i + 1) as i32, y })
+            .collect();
+        let reconstructed = shamir::reconstruct(&sum_shares[..threshold], threshold).unwrap();
+        let decoded = decode_vec(&reconstructed, scale);
+
+        // Expected: element-wise sum of all client values
+        let expected: Vec<f64> = (0..2)
+            .map(|j| client_values.iter().map(|v| v[j]).sum::<f64>())
+            .collect();
+
+        for (a, b) in expected.iter().zip(decoded.iter()) {
+            assert!((a - b).abs() < 1e-6, "expected {a}, got {b}");
         }
     }
 }

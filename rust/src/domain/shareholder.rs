@@ -23,6 +23,9 @@ pub enum Phase {
     TrainingComplete,
 }
 
+/// Maps step → aggregator_id → (result_hash, result_bytes)
+type VoteMap = HashMap<StepId, HashMap<i32, (Vec<u8>, Vec<u8>)>>;
+
 pub struct ShareHolder {
     pub min_clients: usize,
     target: usize,
@@ -32,7 +35,7 @@ pub struct ShareHolder {
     gradients_frozen: HashMap<(i32, i32), bool>,
     current_round_id: i32,
     expected_aggregators: usize,
-    votes: HashMap<StepId, HashMap<i32, (Vec<u8>, Vec<u8>)>>,
+    votes: VoteMap,
     consensus_results: HashMap<StepId, Vec<u8>>,
     phase: Phase,
     current_depth: i32,

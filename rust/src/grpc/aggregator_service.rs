@@ -93,6 +93,7 @@ pub async fn run_aggregator_loop(
 
             let found_splits = aggregator
                 .compute_splits(
+                    round_id,
                     depth,
                     1,
                     &bin_configs,

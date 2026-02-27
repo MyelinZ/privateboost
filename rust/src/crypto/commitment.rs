@@ -6,7 +6,7 @@ const DOMAIN_TAG: &[u8] = b"privateboost-commitment-v1\0";
 
 /// Compute a commitment that binds to the round, client identity, nonce, AND share data.
 ///
-/// commitment = SHA256(domain_tag || u64_be(round_id) || u32_be(len(client_id)) || client_id || nonce || share_hash)
+/// commitment = SHA256(domain_tag || u64_be(round_id) || u32_be(len(client_id)) || client_id || u32_be(len(nonce)) || nonce || share_hash)
 ///
 /// The share_hash binds the commitment to the actual share values, preventing
 /// share swapping attacks.
@@ -28,6 +28,7 @@ pub fn compute_commitment(
     hasher.update((round_id as i64).to_be_bytes());
     hasher.update((client_id.len() as u32).to_be_bytes());
     hasher.update(client_id.as_bytes());
+    hasher.update((nonce.len() as u32).to_be_bytes());
     hasher.update(nonce);
     hasher.update(share_hash);
     hasher.finalize().into()

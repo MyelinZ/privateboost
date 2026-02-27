@@ -15,6 +15,12 @@ pub struct Coordinator {
     runs: Mutex<HashMap<String, (RunConfig, RunStatus)>>,
 }
 
+impl Default for Coordinator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Coordinator {
     pub fn new() -> Self {
         Self {
@@ -80,6 +86,8 @@ mod tests {
             target_count: 5,
             features: vec!["f1".into(), "f2".into()],
             target_column: "target".into(),
+            feature_scales: vec![1e6, 1e6],
+            gradient_scale: 1e6,
         }
     }
 

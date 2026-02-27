@@ -60,7 +60,7 @@ impl ShareholderServiceImpl {
 #[allow(clippy::result_large_err)]
 fn share_from_proto(proto_share: &proto::Share) -> Result<Share, Status> {
     let (_x, scalars) =
-        proto_share_to_scalars(proto_share).map_err(|e| Status::invalid_argument(e))?;
+        proto_share_to_scalars(proto_share).map_err(Status::invalid_argument)?;
     Ok(Share {
         x: proto_share.x,
         y: scalars,

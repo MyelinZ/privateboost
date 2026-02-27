@@ -115,6 +115,8 @@ pub struct RunConfig {
     pub target_count: usize,
     pub features: Vec<String>,
     pub target_column: String,
+    pub feature_scales: Vec<f64>,
+    pub gradient_scale: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

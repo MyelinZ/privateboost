@@ -12,6 +12,12 @@ pub struct Share {
 ///
 /// Uses finite-field arithmetic over the ristretto255 scalar field
 /// for information-theoretic security (no floating-point precision loss).
+///
+/// Note: We implement vector Shamir directly rather than using the `vsss-rs`
+/// crate because vsss-rs operates on single scalars. Our protocol needs to
+/// share vectors of scalars efficiently with a single polynomial per element.
+/// The arithmetic is straightforward (polynomial evaluation + Lagrange
+/// interpolation) and uses the audited `curve25519-dalek` Scalar type.
 pub fn share(values: &[Scalar], n_parties: usize, threshold: usize) -> Result<Vec<Share>> {
     if threshold > n_parties {
         bail!("threshold {threshold} cannot exceed n_parties {n_parties}");
@@ -64,6 +70,11 @@ pub fn reconstruct(shares: &[Share], threshold: usize) -> Result<Vec<Scalar>> {
         );
     }
     let shares = &shares[..threshold];
+    for s in shares {
+        if s.x <= 0 {
+            bail!("share x-coordinate must be positive, got {}", s.x);
+        }
+    }
     let n_values = shares[0].y.len();
 
     // Lagrange coefficients at x=0:
