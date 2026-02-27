@@ -2,8 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use curve25519_dalek::scalar::Scalar;
 
 use crate::crypto::commitment::Commitment;
+use crate::crypto::fixed_point;
 use crate::crypto::shamir::{reconstruct, Share};
 use crate::domain::model::*;
 
@@ -26,13 +28,13 @@ pub trait ShareHolderClient: Send + Sync {
     async fn get_stats_commitments(&self) -> Result<HashSet<Commitment>>;
     async fn get_gradient_commitments(&self, depth: Depth) -> Result<HashSet<Commitment>>;
     async fn get_gradient_node_ids(&self, depth: Depth) -> Result<HashSet<NodeId>>;
-    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<f64>)>;
+    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<Scalar>)>;
     async fn get_gradients_sum(
         &self,
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
-    ) -> Result<(i32, Vec<f64>)>;
+    ) -> Result<(i32, Vec<Scalar>)>;
 }
 
 pub struct Aggregator {
@@ -42,6 +44,8 @@ pub struct Aggregator {
     pub min_clients: usize,
     pub learning_rate: f64,
     pub lambda_reg: f64,
+    pub feature_scales: Vec<f64>,
+    pub gradient_scale: f64,
 }
 
 impl Aggregator {
@@ -52,6 +56,8 @@ impl Aggregator {
         min_clients: usize,
         learning_rate: f64,
         lambda_reg: f64,
+        feature_scales: Vec<f64>,
+        gradient_scale: f64,
     ) -> Result<Self> {
         if shareholders.len() < threshold {
             bail!(
@@ -67,6 +73,8 @@ impl Aggregator {
             min_clients,
             learning_rate,
             lambda_reg,
+            feature_scales,
+            gradient_scale,
         })
     }
 
@@ -122,7 +130,7 @@ impl Aggregator {
         for &idx in selected_indices {
             let sh = &self.shareholders[idx];
             match sh.get_stats_sum(commitments).await {
-                Ok((x, y)) => shares.push(Share { x, y }),
+                Ok((x, scalars)) => shares.push(Share { x, y: scalars }),
                 Err(e) => {
                     tracing::warn!(shareholder = sh.x_coord(), "stats_sum failed: {e}");
                     continue;
@@ -143,7 +151,7 @@ impl Aggregator {
         for &idx in selected_indices {
             let sh = &self.shareholders[idx];
             match sh.get_gradients_sum(depth, commitments, node_id).await {
-                Ok((x, y)) => shares.push(Share { x, y }),
+                Ok((x, scalars)) => shares.push(Share { x, y: scalars }),
                 Err(e) => {
                     tracing::warn!(shareholder = sh.x_coord(), "gradients_sum failed: {e}");
                     continue;
@@ -167,11 +175,18 @@ impl Aggregator {
         let n_total = n_values / 2;
         let n_features = n_total - 1;
 
+        // Stats layout: [x0, x0², x1, x1², ..., target, target²]
+        // Decode Scalars to f64 using per-feature scales.
         let mut means = vec![0.0; n_total];
         let mut variances = vec![0.0; n_total];
         for idx in 0..n_total {
-            let total_x = totals[idx * 2];
-            let total_x2 = totals[idx * 2 + 1];
+            let scale = if idx < self.feature_scales.len() {
+                self.feature_scales[idx]
+            } else {
+                self.feature_scales.last().copied().unwrap_or(1.0)
+            };
+            let total_x = fixed_point::decode(totals[idx * 2], scale);
+            let total_x2 = fixed_point::decode(totals[idx * 2 + 1], scale * scale);
             means[idx] = total_x / n_clients as f64;
             variances[idx] = (total_x2 / n_clients as f64) - (means[idx] * means[idx]);
         }
@@ -236,7 +251,10 @@ impl Aggregator {
                 continue;
             }
 
-            let totals = reconstruct(&shares, self.threshold)?;
+            let totals = fixed_point::decode_vec(
+                &reconstruct(&shares, self.threshold)?,
+                self.gradient_scale,
+            );
 
             let n_bins_total = self.n_bins + 2;
             let grad_size = n_features * n_bins_total;

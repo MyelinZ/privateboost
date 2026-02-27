@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::bail;
+use curve25519_dalek::scalar::Scalar;
 
 use crate::crypto::commitment::Commitment;
 use crate::crypto::shamir::Share;
@@ -235,7 +236,7 @@ impl ShareHolder {
         }
     }
 
-    pub fn get_stats_sum(&self, commitments: &[Commitment]) -> anyhow::Result<Vec<f64>> {
+    pub fn get_stats_sum(&self, commitments: &[Commitment]) -> anyhow::Result<Vec<Scalar>> {
         if commitments.len() < self.min_clients {
             bail!(
                 "Requested {} clients, minimum is {}",
@@ -243,7 +244,7 @@ impl ShareHolder {
                 self.min_clients
             );
         }
-        let mut total: Option<Vec<f64>> = None;
+        let mut total: Option<Vec<Scalar>> = None;
         for commitment in commitments {
             let s = self
                 .stats
@@ -266,7 +267,7 @@ impl ShareHolder {
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
-    ) -> anyhow::Result<Vec<f64>> {
+    ) -> anyhow::Result<Vec<Scalar>> {
         if commitments.len() < self.min_clients {
             bail!(
                 "Requested {} clients, minimum is {}",
@@ -276,7 +277,7 @@ impl ShareHolder {
         }
         let empty_depth: HashMap<Commitment, HashMap<NodeId, Share>> = HashMap::new();
         let depth_data = self.gradients.get(&depth).unwrap_or(&empty_depth);
-        let mut total: Option<Vec<f64>> = None;
+        let mut total: Option<Vec<Scalar>> = None;
         for commitment in commitments {
             if let Some(client_nodes) = depth_data.get(commitment)
                 && let Some(s) = client_nodes.get(&node_id)
@@ -304,7 +305,11 @@ impl ShareHolder {
 mod tests {
     use super::*;
 
-    fn make_share(x: i32, values: &[f64]) -> Share {
+    fn scalar(v: u64) -> Scalar {
+        Scalar::from(v)
+    }
+
+    fn make_share(x: i32, values: &[Scalar]) -> Share {
         Share {
             x,
             y: values.to_vec(),
@@ -316,8 +321,8 @@ mod tests {
         let mut sh = ShareHolder::new(2);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
-        sh.receive_stats(c1, make_share(1, &[10.0, 20.0]));
-        sh.receive_stats(c2, make_share(1, &[30.0, 40.0]));
+        sh.receive_stats(c1, make_share(1, &[scalar(10), scalar(20)]));
+        sh.receive_stats(c2, make_share(1, &[scalar(30), scalar(40)]));
         let commitments = sh.get_stats_commitments();
         assert_eq!(commitments.len(), 2);
     }
@@ -327,17 +332,17 @@ mod tests {
         let mut sh = ShareHolder::new(2);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
-        sh.receive_stats(c1, make_share(1, &[10.0, 20.0]));
-        sh.receive_stats(c2, make_share(1, &[30.0, 40.0]));
+        sh.receive_stats(c1, make_share(1, &[scalar(10), scalar(20)]));
+        sh.receive_stats(c2, make_share(1, &[scalar(30), scalar(40)]));
         let sum = sh.get_stats_sum(&[c1, c2]).unwrap();
-        assert_eq!(sum, vec![40.0, 60.0]);
+        assert_eq!(sum, vec![scalar(40), scalar(60)]);
     }
 
     #[test]
     fn test_min_clients_enforcement() {
         let mut sh = ShareHolder::new(5);
         let c1 = [1u8; 32];
-        sh.receive_stats(c1, make_share(1, &[1.0]));
+        sh.receive_stats(c1, make_share(1, &[scalar(1)]));
         assert!(sh.get_stats_sum(&[c1]).is_err());
     }
 
@@ -345,11 +350,11 @@ mod tests {
     fn test_gradient_round_reset() {
         let mut sh = ShareHolder::new(1);
         let c1 = [1u8; 32];
-        sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(1)]), 0);
         assert_eq!(sh.get_gradient_commitments(0).len(), 1);
         // New round clears
         let c2 = [2u8; 32];
-        sh.receive_gradients(1, 0, c2, make_share(1, &[2.0]), 0);
+        sh.receive_gradients(1, 0, c2, make_share(1, &[scalar(2)]), 0);
         assert_eq!(sh.get_gradient_commitments(0).len(), 1);
         assert!(sh.get_gradient_commitments(0).contains(&c2));
     }
@@ -359,17 +364,17 @@ mod tests {
         let mut sh = ShareHolder::new(2);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
-        sh.receive_gradients(0, 0, c1, make_share(1, &[5.0, 10.0]), 0);
-        sh.receive_gradients(0, 0, c2, make_share(1, &[3.0, 7.0]), 0);
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(5), scalar(10)]), 0);
+        sh.receive_gradients(0, 0, c2, make_share(1, &[scalar(3), scalar(7)]), 0);
         let sum = sh.get_gradients_sum(0, &[c1, c2], 0).unwrap();
-        assert_eq!(sum, vec![8.0, 17.0]);
+        assert_eq!(sum, vec![scalar(8), scalar(17)]);
     }
 
     #[test]
     fn test_gradients_sum_missing_node() {
         let mut sh = ShareHolder::new(1);
         let c1 = [1u8; 32];
-        sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(1)]), 0);
         assert!(sh.get_gradients_sum(0, &[c1], 99).is_err());
     }
 
@@ -378,10 +383,10 @@ mod tests {
         let mut sh = ShareHolder::new(3);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
-        sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
-        sh.receive_gradients(0, 0, c1, make_share(1, &[2.0]), 1);
-        sh.receive_gradients(0, 0, c2, make_share(1, &[3.0]), 0);
-        sh.receive_gradients(0, 0, c2, make_share(1, &[4.0]), 2);
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(1)]), 0);
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(2)]), 1);
+        sh.receive_gradients(0, 0, c2, make_share(1, &[scalar(3)]), 0);
+        sh.receive_gradients(0, 0, c2, make_share(1, &[scalar(4)]), 2);
         let node_ids = sh.get_gradient_node_ids(0);
         assert_eq!(node_ids.len(), 3);
         assert!(node_ids.contains(&0));
@@ -393,8 +398,8 @@ mod tests {
     fn test_reset() {
         let mut sh = ShareHolder::new(1);
         let c1 = [1u8; 32];
-        sh.receive_stats(c1, make_share(1, &[1.0]));
-        sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
+        sh.receive_stats(c1, make_share(1, &[scalar(1)]));
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(1)]), 0);
         sh.reset();
         assert_eq!(sh.get_stats_commitments().len(), 0);
         assert_eq!(sh.get_gradient_commitments(0).len(), 0);
@@ -405,7 +410,7 @@ mod tests {
         let mut sh = ShareHolder::new(1);
         assert_eq!(sh.current_round_id(), -1);
         let c1 = [1u8; 32];
-        sh.receive_gradients(3, 0, c1, make_share(1, &[1.0]), 0);
+        sh.receive_gradients(3, 0, c1, make_share(1, &[scalar(1)]), 0);
         assert_eq!(sh.current_round_id(), 3);
     }
 
@@ -413,7 +418,7 @@ mod tests {
     fn test_min_clients_enforcement_gradients() {
         let mut sh = ShareHolder::new(5);
         let c1 = [1u8; 32];
-        sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
+        sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(1)]), 0);
         assert!(sh.get_gradients_sum(0, &[c1], 0).is_err());
     }
 
@@ -425,14 +430,14 @@ mod tests {
         assert!(!sh.is_stats_frozen());
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
-        assert!(sh.receive_stats(c1, make_share(1, &[1.0])));
+        assert!(sh.receive_stats(c1, make_share(1, &[scalar(1)])));
         assert!(!sh.is_stats_frozen());
-        assert!(sh.receive_stats(c2, make_share(1, &[2.0])));
+        assert!(sh.receive_stats(c2, make_share(1, &[scalar(2)])));
         // 2 commitments >= min_clients=2, should auto-freeze
         assert!(sh.is_stats_frozen());
         // Subsequent submissions rejected
         let c3 = [3u8; 32];
-        assert!(!sh.receive_stats(c3, make_share(1, &[3.0])));
+        assert!(!sh.receive_stats(c3, make_share(1, &[scalar(3)])));
         assert_eq!(sh.get_stats_commitments().len(), 2);
     }
 
@@ -442,12 +447,12 @@ mod tests {
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
         let c3 = [3u8; 32];
-        assert!(sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0));
+        assert!(sh.receive_gradients(0, 0, c1, make_share(1, &[scalar(1)]), 0));
         assert!(!sh.is_gradients_frozen(0, 0));
-        assert!(sh.receive_gradients(0, 0, c2, make_share(1, &[2.0]), 0));
+        assert!(sh.receive_gradients(0, 0, c2, make_share(1, &[scalar(2)]), 0));
         assert!(sh.is_gradients_frozen(0, 0));
         // Rejected after freeze
-        assert!(!sh.receive_gradients(0, 0, c3, make_share(1, &[3.0]), 0));
+        assert!(!sh.receive_gradients(0, 0, c3, make_share(1, &[scalar(3)]), 0));
     }
 
     #[test]
@@ -455,10 +460,10 @@ mod tests {
         let mut sh = ShareHolder::new(2);
         sh.set_target(5); // freeze at 5, not min_clients
         for i in 0u8..4 {
-            assert!(sh.receive_stats([i; 32], make_share(1, &[1.0])));
+            assert!(sh.receive_stats([i; 32], make_share(1, &[scalar(1)])));
         }
         assert!(!sh.is_stats_frozen());
-        assert!(sh.receive_stats([4u8; 32], make_share(1, &[5.0])));
+        assert!(sh.receive_stats([4u8; 32], make_share(1, &[scalar(5)])));
         assert!(sh.is_stats_frozen());
     }
 
@@ -515,8 +520,8 @@ mod tests {
         assert_eq!(sh.phase(), Phase::CollectingStats);
 
         // Submit stats until frozen
-        sh.receive_stats([1u8; 32], make_share(1, &[1.0]));
-        sh.receive_stats([2u8; 32], make_share(1, &[2.0]));
+        sh.receive_stats([1u8; 32], make_share(1, &[scalar(1)]));
+        sh.receive_stats([2u8; 32], make_share(1, &[scalar(2)]));
         assert_eq!(sh.phase(), Phase::FrozenStats);
 
         // Aggregator submits bins consensus
@@ -535,14 +540,14 @@ mod tests {
         sh.set_training_params(3, 3); // 3 trees, max_depth 3
 
         // Get to gradient phase
-        sh.receive_stats([1u8; 32], make_share(1, &[1.0]));
-        sh.receive_stats([2u8; 32], make_share(1, &[2.0]));
+        sh.receive_stats([1u8; 32], make_share(1, &[scalar(1)]));
+        sh.receive_stats([2u8; 32], make_share(1, &[scalar(2)]));
         sh.submit_vote(StepId::stats(), 0, vec![1u8; 32], b"bins".to_vec());
         assert_eq!(sh.phase(), Phase::CollectingGradients);
 
         // Submit gradients until frozen
-        sh.receive_gradients(0, 0, [10u8; 32], make_share(1, &[1.0]), 0);
-        sh.receive_gradients(0, 0, [11u8; 32], make_share(1, &[2.0]), 0);
+        sh.receive_gradients(0, 0, [10u8; 32], make_share(1, &[scalar(1)]), 0);
+        sh.receive_gradients(0, 0, [11u8; 32], make_share(1, &[scalar(2)]), 0);
         assert_eq!(sh.phase(), Phase::FrozenGradients);
 
         // Aggregator submits splits consensus
@@ -560,18 +565,18 @@ mod tests {
         sh.set_training_params(2, 2); // 2 trees, max_depth 2
 
         // Stats phase
-        sh.receive_stats([1u8; 32], make_share(1, &[1.0]));
-        sh.receive_stats([2u8; 32], make_share(1, &[2.0]));
+        sh.receive_stats([1u8; 32], make_share(1, &[scalar(1)]));
+        sh.receive_stats([2u8; 32], make_share(1, &[scalar(2)]));
         sh.submit_vote(StepId::stats(), 0, vec![1u8; 32], b"bins".to_vec());
 
         // Round 0, depth 0
-        sh.receive_gradients(0, 0, [10u8; 32], make_share(1, &[1.0]), 0);
-        sh.receive_gradients(0, 0, [11u8; 32], make_share(1, &[2.0]), 0);
+        sh.receive_gradients(0, 0, [10u8; 32], make_share(1, &[scalar(1)]), 0);
+        sh.receive_gradients(0, 0, [11u8; 32], make_share(1, &[scalar(2)]), 0);
         sh.submit_vote(StepId::gradients(0, 0), 0, vec![1u8; 32], b"splits0".to_vec());
 
         // Round 0, depth 1 (last depth)
-        sh.receive_gradients(0, 1, [20u8; 32], make_share(1, &[1.0]), 0);
-        sh.receive_gradients(0, 1, [21u8; 32], make_share(1, &[2.0]), 0);
+        sh.receive_gradients(0, 1, [20u8; 32], make_share(1, &[scalar(1)]), 0);
+        sh.receive_gradients(0, 1, [21u8; 32], make_share(1, &[scalar(2)]), 0);
         sh.submit_vote(StepId::gradients(0, 1), 0, vec![1u8; 32], b"tree0".to_vec());
 
         // Should advance to round 1
@@ -580,13 +585,13 @@ mod tests {
         assert_eq!(sh.current_depth(), 0);
 
         // Round 1, depth 0
-        sh.receive_gradients(1, 0, [30u8; 32], make_share(1, &[1.0]), 0);
-        sh.receive_gradients(1, 0, [31u8; 32], make_share(1, &[2.0]), 0);
+        sh.receive_gradients(1, 0, [30u8; 32], make_share(1, &[scalar(1)]), 0);
+        sh.receive_gradients(1, 0, [31u8; 32], make_share(1, &[scalar(2)]), 0);
         sh.submit_vote(StepId::gradients(1, 0), 0, vec![1u8; 32], b"splits1".to_vec());
 
         // Round 1, depth 1 (last depth, last round)
-        sh.receive_gradients(1, 1, [40u8; 32], make_share(1, &[1.0]), 0);
-        sh.receive_gradients(1, 1, [41u8; 32], make_share(1, &[2.0]), 0);
+        sh.receive_gradients(1, 1, [40u8; 32], make_share(1, &[scalar(1)]), 0);
+        sh.receive_gradients(1, 1, [41u8; 32], make_share(1, &[scalar(2)]), 0);
         sh.submit_vote(StepId::gradients(1, 1), 0, vec![1u8; 32], b"tree1".to_vec());
 
         // Should be training complete

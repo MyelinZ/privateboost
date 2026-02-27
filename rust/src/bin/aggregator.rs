@@ -65,7 +65,28 @@ async fn main() -> anyhow::Result<()> {
         sh_clients.push(Box::new(rsh.clone()));
     }
 
-    let aggregator = Aggregator::new(sh_clients, n_bins, threshold, min_clients, learning_rate, lambda_reg)?;
+    // Feature scales and gradient scale will be populated from the training config.
+    // For now, use environment variables with sensible defaults.
+    let feature_scales: Vec<f64> = std::env::var("FEATURE_SCALES")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.trim().parse::<f64>().unwrap_or(1e6))
+        .collect();
+    let gradient_scale: f64 = std::env::var("GRADIENT_SCALE")
+        .unwrap_or_else(|_| "1000000".into())
+        .parse()?;
+
+    let aggregator = Aggregator::new(
+        sh_clients,
+        n_bins,
+        threshold,
+        min_clients,
+        learning_rate,
+        lambda_reg,
+        feature_scales,
+        gradient_scale,
+    )?;
 
     run_aggregator_loop(
         aggregator_id,

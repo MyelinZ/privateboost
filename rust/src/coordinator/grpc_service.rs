@@ -101,6 +101,7 @@ fn domain_to_training_config(config: &RunConfig) -> proto::TrainingConfig {
             .map(|(i, name)| proto::FeatureSpec {
                 index: i as i32,
                 name: name.clone(),
+                scale: 0.0,
             })
             .collect(),
         target_column: config.target_column.clone(),
@@ -114,5 +115,6 @@ fn domain_to_training_config(config: &RunConfig) -> proto::TrainingConfig {
         target: Some(proto::training_config::Target::TargetCount(
             config.target_count as i32,
         )),
+        gradient_scale: 0.0,
     }
 }

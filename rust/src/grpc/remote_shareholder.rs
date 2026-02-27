@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use curve25519_dalek::scalar::Scalar;
 use tonic::transport::Channel;
 
 use crate::crypto::commitment::Commitment;
 use crate::domain::aggregator::ShareHolderClient;
 use crate::domain::model::{Depth, NodeId};
-use crate::grpc::ndarray_to_vec;
+use crate::grpc::bytes_to_scalars;
 use crate::proto;
 use crate::proto::shareholder_service_client::ShareholderServiceClient;
 
@@ -90,7 +91,7 @@ impl ShareHolderClient for Arc<RemoteShareHolder> {
         (**self).get_gradient_node_ids(depth).await
     }
 
-    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<f64>)> {
+    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<Scalar>)> {
         (**self).get_stats_sum(commitments).await
     }
 
@@ -99,7 +100,7 @@ impl ShareHolderClient for Arc<RemoteShareHolder> {
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
-    ) -> Result<(i32, Vec<f64>)> {
+    ) -> Result<(i32, Vec<Scalar>)> {
         (**self).get_gradients_sum(depth, commitments, node_id).await
     }
 }
@@ -156,7 +157,7 @@ impl ShareHolderClient for RemoteShareHolder {
         Ok(resp.node_ids.into_iter().collect())
     }
 
-    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<f64>)> {
+    async fn get_stats_sum(&self, commitments: &[Commitment]) -> Result<(i32, Vec<Scalar>)> {
         let proto_commitments: Vec<Vec<u8>> = commitments.iter().map(|c| c.to_vec()).collect();
         let mut client = self.client.lock().await;
         let resp = client
@@ -170,7 +171,9 @@ impl ShareHolderClient for RemoteShareHolder {
         let values = resp
             .sum
             .as_ref()
-            .map(ndarray_to_vec)
+            .map(|arr| bytes_to_scalars(&arr.data))
+            .transpose()
+            .map_err(|e| anyhow::anyhow!(e))?
             .unwrap_or_default();
 
         Ok((self.x, values))
@@ -181,7 +184,7 @@ impl ShareHolderClient for RemoteShareHolder {
         depth: Depth,
         commitments: &[Commitment],
         node_id: NodeId,
-    ) -> Result<(i32, Vec<f64>)> {
+    ) -> Result<(i32, Vec<Scalar>)> {
         let proto_commitments: Vec<Vec<u8>> = commitments.iter().map(|c| c.to_vec()).collect();
         let mut client = self.client.lock().await;
         let resp = client
@@ -198,7 +201,9 @@ impl ShareHolderClient for RemoteShareHolder {
         let values = resp
             .sum
             .as_ref()
-            .map(ndarray_to_vec)
+            .map(|arr| bytes_to_scalars(&arr.data))
+            .transpose()
+            .map_err(|e| anyhow::anyhow!(e))?
             .unwrap_or_default();
 
         Ok((self.x, values))

@@ -7,7 +7,7 @@ use tonic::{Request, Response, Status};
 use crate::crypto::shamir::Share;
 use crate::domain::model::StepId;
 use crate::domain::shareholder::{Phase, ShareHolder, VoteStatus};
-use crate::grpc::{ndarray_to_vec, vec_to_ndarray};
+use crate::grpc::{proto_share_to_scalars, scalars_to_bytes};
 use crate::proto;
 
 pub struct ShareholderServiceImpl {
@@ -55,26 +55,15 @@ impl ShareholderServiceImpl {
             .map(Arc::clone)
             .ok_or_else(|| Status::not_found(format!("Run {run_id} not found")))
     }
-
-    async fn get_or_create_run(&self, run_id: &str) -> Result<Arc<RwLock<ShareHolder>>, Status> {
-        let mut runs = self.runs.lock().await;
-        let sh = runs
-            .entry(run_id.to_string())
-            .or_insert_with(|| Arc::new(RwLock::new(ShareHolder::new(self.min_clients))));
-        Ok(Arc::clone(sh))
-    }
 }
 
 #[allow(clippy::result_large_err)]
 fn share_from_proto(proto_share: &proto::Share) -> Result<Share, Status> {
-    let y_arr = proto_share
-        .y
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("Share must have y field"))?;
-    let y = ndarray_to_vec(y_arr);
+    let (_x, scalars) =
+        proto_share_to_scalars(proto_share).map_err(|e| Status::invalid_argument(e))?;
     Ok(Share {
         x: proto_share.x,
-        y,
+        y: scalars,
     })
 }
 
@@ -120,7 +109,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::SubmitStatsRequest>,
     ) -> Result<Response<proto::SubmitStatsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_or_create_run(&req.run_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let share = share_from_proto(
             req.share
                 .as_ref()
@@ -140,7 +129,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::SubmitGradientsRequest>,
     ) -> Result<Response<proto::SubmitGradientsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_or_create_run(&req.run_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let share = share_from_proto(
             req.share
                 .as_ref()
@@ -226,7 +215,11 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
             .get_stats_sum(&commitments)
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
         Ok(Response::new(proto::GetStatsSumResponse {
-            sum: Some(vec_to_ndarray(&total)),
+            sum: Some(proto::NdArray {
+                dtype: 0,
+                shape: vec![total.len() as i64],
+                data: scalars_to_bytes(&total),
+            }),
         }))
     }
 
@@ -246,7 +239,11 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
             .get_gradients_sum(req.depth, &commitments, req.node_id)
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
         Ok(Response::new(proto::GetGradientsSumResponse {
-            sum: Some(vec_to_ndarray(&total)),
+            sum: Some(proto::NdArray {
+                dtype: 0,
+                shape: vec![total.len() as i64],
+                data: scalars_to_bytes(&total),
+            }),
         }))
     }
 
