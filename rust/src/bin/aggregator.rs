@@ -1,14 +1,17 @@
-use privateboost::grpc::aggregator_service::{AggregatorConfig, AggregatorServiceImpl};
-use privateboost::proto::aggregator_service_server::AggregatorServiceServer;
-use privateboost::proto::FeatureSpec;
-use tonic::transport::Server;
+use std::sync::Arc;
+
+use privateboost::domain::aggregator::Aggregator;
+use privateboost::grpc::aggregator_service::run_aggregator_loop;
+use privateboost::grpc::remote_shareholder::RemoteShareHolder;
 use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "50052".into());
+    let aggregator_id: i32 = std::env::var("AGGREGATOR_ID")
+        .expect("AGGREGATOR_ID env var required")
+        .parse()?;
 
     let shareholders_str = std::env::var("SHAREHOLDERS")
         .expect("SHAREHOLDERS env var required (comma-separated host:port list)");
@@ -38,50 +41,42 @@ async fn main() -> anyhow::Result<()> {
     let min_clients: usize = std::env::var("MIN_CLIENTS")
         .unwrap_or_else(|_| "10".into())
         .parse()?;
-    let loss = std::env::var("LOSS").unwrap_or_else(|_| "squared".into());
-    let target_column = std::env::var("TARGET_COLUMN").unwrap_or_else(|_| "target".into());
+    let run_id = std::env::var("RUN_ID")
+        .expect("RUN_ID env var required");
 
-    let target_count: Option<usize> = std::env::var("TARGET_COUNT")
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { s.parse().ok() });
-    let target_fraction: Option<f64> = std::env::var("TARGET_FRACTION")
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { s.parse().ok() });
-
-    let features_str = std::env::var("FEATURES").unwrap_or_default();
-    let features: Vec<FeatureSpec> = features_str
-        .split(',')
-        .enumerate()
-        .filter(|(_, name)| !name.trim().is_empty())
-        .map(|(i, name)| FeatureSpec {
-            index: i as i32,
-            name: name.trim().to_string(),
-        })
-        .collect();
-
-    let config = AggregatorConfig {
-        sh_addresses: sh_addresses.clone(),
-        n_bins,
+    info!(
+        aggregator_id,
+        ?sh_addresses,
         threshold,
-        min_clients,
-        learning_rate,
-        lambda_reg,
         n_trees,
         max_depth,
-        loss,
-        target_count,
-        target_fraction,
-        features,
-        target_column,
-    };
+        %run_id,
+        "Aggregator starting"
+    );
 
-    let addr = format!("0.0.0.0:{port}").parse()?;
-    let service = AggregatorServiceImpl::new(config);
+    // Connect to shareholders
+    let mut remote_shareholders = Vec::new();
+    let mut sh_clients: Vec<Box<dyn privateboost::domain::aggregator::ShareHolderClient>> = Vec::new();
 
-    info!(%addr, ?sh_addresses, threshold, n_trees, max_depth, "Aggregator server listening");
-    Server::builder()
-        .add_service(AggregatorServiceServer::new(service))
-        .serve(addr)
-        .await?;
+    for (i, addr) in sh_addresses.iter().enumerate() {
+        let rsh = RemoteShareHolder::connect(addr, (i + 1) as i32, run_id.clone()).await?;
+        let rsh = Arc::new(rsh);
+        remote_shareholders.push(Arc::clone(&rsh));
+        sh_clients.push(Box::new(rsh.clone()));
+    }
+
+    let aggregator = Aggregator::new(sh_clients, n_bins, threshold, min_clients, learning_rate, lambda_reg)?;
+
+    run_aggregator_loop(
+        aggregator_id,
+        aggregator,
+        remote_shareholders,
+        run_id,
+        n_trees,
+        max_depth,
+    )
+    .await?;
+
+    info!(aggregator_id, "Aggregator finished");
     Ok(())
 }
