@@ -1,0 +1,28 @@
+services:
+  shareholder-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    command: []
+    entrypoint: ["shareholder"]
+
+  shareholder-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    command: []
+    entrypoint: ["shareholder"]
+
+  shareholder-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    command: []
+    entrypoint: ["shareholder"]
+
+  aggregator:
+    build:
+      context: .
+      dockerfile: Dockerfile.rust
+    command: []
+    entrypoint: ["aggregator"]
