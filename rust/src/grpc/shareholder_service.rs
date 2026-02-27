@@ -1,67 +1,67 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::crypto::shamir::Share;
-use crate::domain::shareholder::ShareHolder;
+use crate::domain::model::StepId;
+use crate::domain::shareholder::{Phase, ShareHolder, VoteStatus};
 use crate::grpc::{ndarray_to_vec, vec_to_ndarray};
 use crate::proto;
 
-const MAX_CANCELLED_SESSIONS: usize = 10_000;
-
 pub struct ShareholderServiceImpl {
     min_clients: usize,
-    sessions: Arc<Mutex<HashMap<String, Arc<RwLock<ShareHolder>>>>>,
-    cancelled: Arc<Mutex<HashSet<String>>>,
+    runs: Arc<tokio::sync::Mutex<HashMap<String, Arc<RwLock<ShareHolder>>>>>,
+    expected_aggregators: usize,
 }
 
 impl ShareholderServiceImpl {
-    pub fn new(min_clients: usize) -> Self {
+    pub fn new(min_clients: usize, expected_aggregators: usize) -> Self {
         Self {
             min_clients,
-            sessions: Arc::new(Mutex::new(HashMap::new())),
-            cancelled: Arc::new(Mutex::new(HashSet::new())),
+            runs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            expected_aggregators,
         }
     }
 
-    async fn get_or_create_session(
+    /// Register a run (called when coordinator notifies of a new active run).
+    pub async fn register_run(
         &self,
-        session_id: &str,
-    ) -> Result<Arc<RwLock<ShareHolder>>, Status> {
-        let cancelled = self.cancelled.lock().await;
-        if cancelled.contains(session_id) {
-            return Err(Status::not_found(format!(
-                "Session {session_id} cancelled"
-            )));
+        run_id: &str,
+        target: usize,
+        n_trees: usize,
+        max_depth: usize,
+    ) {
+        let mut runs = self.runs.lock().await;
+        if !runs.contains_key(run_id) {
+            let mut sh = ShareHolder::new(self.min_clients);
+            sh.set_target(target);
+            sh.set_expected_aggregators(self.expected_aggregators);
+            sh.set_training_params(n_trees, max_depth);
+            runs.insert(run_id.to_string(), Arc::new(RwLock::new(sh)));
         }
-        drop(cancelled);
+    }
 
-        let mut sessions = self.sessions.lock().await;
-        let sh = sessions
-            .entry(session_id.to_string())
+    /// Remove a run (called when coordinator says cancelled/complete).
+    pub async fn remove_run(&self, run_id: &str) {
+        let mut runs = self.runs.lock().await;
+        runs.remove(run_id);
+    }
+
+    async fn get_run(&self, run_id: &str) -> Result<Arc<RwLock<ShareHolder>>, Status> {
+        let runs = self.runs.lock().await;
+        runs.get(run_id)
+            .map(Arc::clone)
+            .ok_or_else(|| Status::not_found(format!("Run {run_id} not found")))
+    }
+
+    async fn get_or_create_run(&self, run_id: &str) -> Result<Arc<RwLock<ShareHolder>>, Status> {
+        let mut runs = self.runs.lock().await;
+        let sh = runs
+            .entry(run_id.to_string())
             .or_insert_with(|| Arc::new(RwLock::new(ShareHolder::new(self.min_clients))));
         Ok(Arc::clone(sh))
-    }
-
-    async fn get_session(
-        &self,
-        session_id: &str,
-    ) -> Result<Arc<RwLock<ShareHolder>>, Status> {
-        let cancelled = self.cancelled.lock().await;
-        if cancelled.contains(session_id) {
-            return Err(Status::not_found(format!(
-                "Session {session_id} cancelled"
-            )));
-        }
-        drop(cancelled);
-
-        let sessions = self.sessions.lock().await;
-        sessions
-            .get(session_id)
-            .map(Arc::clone)
-            .ok_or_else(|| Status::not_found(format!("Session {session_id} not found")))
     }
 }
 
@@ -85,6 +85,34 @@ fn bytes_to_commitment(bytes: &[u8]) -> Result<[u8; 32], Status> {
         .map_err(|_| Status::invalid_argument("commitment must be 32 bytes"))
 }
 
+fn proto_step_to_domain(step: &proto::StepId) -> StepId {
+    match proto::StepType::try_from(step.step_type) {
+        Ok(proto::StepType::Stats) => StepId::stats(),
+        Ok(proto::StepType::Gradients) | Err(_) => StepId::gradients(step.round_id, step.depth),
+    }
+}
+
+fn serialize_result(result: &proto::submit_result_request::Result) -> Vec<u8> {
+    use prost::Message;
+    match result {
+        proto::submit_result_request::Result::BinsResult(br) => {
+            let mut buf = Vec::new();
+            br.encode(&mut buf).unwrap();
+            buf
+        }
+        proto::submit_result_request::Result::SplitsResult(sr) => {
+            let mut buf = Vec::new();
+            sr.encode(&mut buf).unwrap();
+            buf
+        }
+        proto::submit_result_request::Result::TreeResult(tr) => {
+            let mut buf = Vec::new();
+            tr.encode(&mut buf).unwrap();
+            buf
+        }
+    }
+}
+
 #[tonic::async_trait]
 impl proto::shareholder_service_server::ShareholderService for ShareholderServiceImpl {
     async fn submit_stats(
@@ -92,7 +120,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::SubmitStatsRequest>,
     ) -> Result<Response<proto::SubmitStatsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_or_create_session(&req.session_id).await?;
+        let sh = self.get_or_create_run(&req.run_id).await?;
         let share = share_from_proto(
             req.share
                 .as_ref()
@@ -100,7 +128,10 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         )?;
         let commitment = bytes_to_commitment(&req.commitment)?;
         let mut sh = sh.write().await;
-        sh.receive_stats(commitment, share);
+        let accepted = sh.receive_stats(commitment, share);
+        if !accepted {
+            tracing::warn!(run_id = %req.run_id, "stats share rejected (frozen)");
+        }
         Ok(Response::new(proto::SubmitStatsResponse {}))
     }
 
@@ -109,7 +140,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::SubmitGradientsRequest>,
     ) -> Result<Response<proto::SubmitGradientsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_or_create_session(&req.session_id).await?;
+        let sh = self.get_or_create_run(&req.run_id).await?;
         let share = share_from_proto(
             req.share
                 .as_ref()
@@ -117,7 +148,16 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         )?;
         let commitment = bytes_to_commitment(&req.commitment)?;
         let mut sh = sh.write().await;
-        sh.receive_gradients(req.round_id, req.depth, commitment, share, req.node_id);
+        let accepted =
+            sh.receive_gradients(req.round_id, req.depth, commitment, share, req.node_id);
+        if !accepted {
+            tracing::warn!(
+                run_id = %req.run_id,
+                round_id = req.round_id,
+                depth = req.depth,
+                "gradient share rejected (frozen)"
+            );
+        }
         Ok(Response::new(proto::SubmitGradientsResponse {}))
     }
 
@@ -126,7 +166,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::GetStatsCommitmentsRequest>,
     ) -> Result<Response<proto::GetStatsCommitmentsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_session(&req.session_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let sh = sh.read().await;
         let commitments = sh.get_stats_commitments();
         Ok(Response::new(proto::GetStatsCommitmentsResponse {
@@ -139,7 +179,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::GetGradientCommitmentsRequest>,
     ) -> Result<Response<proto::GetGradientCommitmentsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_session(&req.session_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let sh = sh.read().await;
         if sh.current_round_id() != req.round_id {
             return Ok(Response::new(proto::GetGradientCommitmentsResponse {
@@ -157,7 +197,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::GetGradientNodeIdsRequest>,
     ) -> Result<Response<proto::GetGradientNodeIdsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_session(&req.session_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let sh = sh.read().await;
         if sh.current_round_id() != req.round_id {
             return Ok(Response::new(proto::GetGradientNodeIdsResponse {
@@ -175,7 +215,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::GetStatsSumRequest>,
     ) -> Result<Response<proto::GetStatsSumResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_session(&req.session_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let commitments: Vec<[u8; 32]> = req
             .commitments
             .iter()
@@ -195,7 +235,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         request: Request<proto::GetGradientsSumRequest>,
     ) -> Result<Response<proto::GetGradientsSumResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_session(&req.session_id).await?;
+        let sh = self.get_run(&req.run_id).await?;
         let commitments: Vec<[u8; 32]> = req
             .commitments
             .iter()
@@ -210,30 +250,130 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
         }))
     }
 
-    async fn cancel_session(
+    async fn submit_result(
         &self,
-        request: Request<proto::CancelSessionRequest>,
-    ) -> Result<Response<proto::CancelSessionResponse>, Status> {
+        request: Request<proto::SubmitResultRequest>,
+    ) -> Result<Response<proto::SubmitResultResponse>, Status> {
         let req = request.into_inner();
-        let mut cancelled = self.cancelled.lock().await;
-        if cancelled.len() >= MAX_CANCELLED_SESSIONS {
-            cancelled.clear();
-        }
-        cancelled.insert(req.session_id.clone());
-        drop(cancelled);
-        let mut sessions = self.sessions.lock().await;
-        sessions.remove(&req.session_id);
-        Ok(Response::new(proto::CancelSessionResponse {}))
+        let sh = self.get_run(&req.run_id).await?;
+
+        let step = req
+            .step
+            .ok_or_else(|| Status::invalid_argument("missing step"))?;
+        let step_id = proto_step_to_domain(&step);
+
+        let result_bytes = match &req.result {
+            Some(r) => serialize_result(r),
+            None => return Err(Status::invalid_argument("missing result")),
+        };
+
+        let mut sh = sh.write().await;
+        let status = sh.submit_vote(step_id, req.aggregator_id, req.result_hash, result_bytes);
+
+        Ok(Response::new(proto::SubmitResultResponse {
+            consensus_reached: status == VoteStatus::Consensus,
+        }))
     }
 
-    async fn reset(
+    async fn get_consensus_bins(
         &self,
-        request: Request<proto::ResetRequest>,
-    ) -> Result<Response<proto::ResetResponse>, Status> {
+        request: Request<proto::GetConsensusBinsRequest>,
+    ) -> Result<Response<proto::GetConsensusBinsResponse>, Status> {
         let req = request.into_inner();
-        let sh = self.get_session(&req.session_id).await?;
-        let mut sh = sh.write().await;
-        sh.reset();
-        Ok(Response::new(proto::ResetResponse {}))
+        let sh = self.get_run(&req.run_id).await?;
+        let sh = sh.read().await;
+
+        let step = StepId::stats();
+        match sh.get_consensus(step) {
+            Some(data) => {
+                let bins_result: proto::BinsResult =
+                    prost::Message::decode(data.as_slice()).map_err(|e| {
+                        Status::internal(format!("Failed to decode bins: {e}"))
+                    })?;
+                Ok(Response::new(proto::GetConsensusBinsResponse {
+                    bins: bins_result.bins,
+                    initial_prediction: bins_result.initial_prediction,
+                    ready: true,
+                }))
+            }
+            None => Ok(Response::new(proto::GetConsensusBinsResponse {
+                bins: vec![],
+                initial_prediction: 0.0,
+                ready: false,
+            })),
+        }
+    }
+
+    async fn get_consensus_splits(
+        &self,
+        request: Request<proto::GetConsensusSplitsRequest>,
+    ) -> Result<Response<proto::GetConsensusSplitsResponse>, Status> {
+        let req = request.into_inner();
+        let sh = self.get_run(&req.run_id).await?;
+        let sh = sh.read().await;
+
+        let step = StepId::gradients(req.round_id, req.depth);
+        match sh.get_consensus(step) {
+            Some(data) => {
+                let splits_result: proto::SplitsResult =
+                    prost::Message::decode(data.as_slice()).map_err(|e| {
+                        Status::internal(format!("Failed to decode splits: {e}"))
+                    })?;
+                Ok(Response::new(proto::GetConsensusSplitsResponse {
+                    splits: splits_result.splits,
+                    ready: true,
+                }))
+            }
+            None => Ok(Response::new(proto::GetConsensusSplitsResponse {
+                splits: HashMap::new(),
+                ready: false,
+            })),
+        }
+    }
+
+    async fn get_consensus_model(
+        &self,
+        request: Request<proto::GetConsensusModelRequest>,
+    ) -> Result<Response<proto::GetConsensusModelResponse>, Status> {
+        let req = request.into_inner();
+        let sh = self.get_run(&req.run_id).await?;
+        let sh = sh.read().await;
+
+        if sh.phase() != Phase::TrainingComplete {
+            return Ok(Response::new(proto::GetConsensusModelResponse {
+                model: None,
+            }));
+        }
+
+        // Model assembly from individual tree results will come later.
+        // For now, return empty model placeholder when training is complete.
+        Ok(Response::new(proto::GetConsensusModelResponse {
+            model: None,
+        }))
+    }
+
+    async fn get_run_state(
+        &self,
+        request: Request<proto::GetRunStateRequest>,
+    ) -> Result<Response<proto::GetRunStateResponse>, Status> {
+        let req = request.into_inner();
+        let sh = self.get_run(&req.run_id).await?;
+        let sh = sh.read().await;
+
+        let phase = match sh.phase() {
+            Phase::CollectingStats => proto::Phase::CollectingStats,
+            Phase::FrozenStats => proto::Phase::FrozenStats,
+            Phase::CollectingGradients => proto::Phase::CollectingGradients,
+            Phase::FrozenGradients => proto::Phase::FrozenGradients,
+            Phase::TrainingComplete => proto::Phase::TrainingComplete,
+        };
+
+        Ok(Response::new(proto::GetRunStateResponse {
+            phase: phase as i32,
+            round_id: sh.current_round_id(),
+            depth: sh.current_depth(),
+            expected_aggregators: self.expected_aggregators as i32,
+            received_results: 0,
+        }))
     }
 }
