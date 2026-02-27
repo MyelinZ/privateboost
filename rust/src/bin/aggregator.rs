@@ -2,9 +2,12 @@ use privateboost::grpc::aggregator_service::{AggregatorConfig, AggregatorService
 use privateboost::proto::aggregator_service_server::AggregatorServiceServer;
 use privateboost::proto::FeatureSpec;
 use tonic::transport::Server;
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let port = std::env::var("PORT").unwrap_or_else(|_| "50052".into());
 
     let shareholders_str = std::env::var("SHAREHOLDERS")
@@ -75,9 +78,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = format!("0.0.0.0:{port}").parse()?;
     let service = AggregatorServiceImpl::new(config);
 
-    eprintln!("Aggregator server listening on {addr}");
-    eprintln!("  Shareholders: {sh_addresses:?}");
-    eprintln!("  Threshold: {threshold}, Trees: {n_trees}, Depth: {max_depth}");
+    info!(%addr, ?sh_addresses, threshold, n_trees, max_depth, "Aggregator server listening");
     Server::builder()
         .add_service(AggregatorServiceServer::new(service))
         .serve(addr)

@@ -138,7 +138,7 @@ impl Aggregator {
             match sh.get_stats_sum(commitments).await {
                 Ok((x, y)) => shares.push(Share { x, y }),
                 Err(e) => {
-                    eprintln!("Warning: shareholder {} stats_sum failed: {e}", sh.x_coord());
+                    tracing::warn!(shareholder = sh.x_coord(), "stats_sum failed: {e}");
                     continue;
                 }
             }
@@ -159,7 +159,7 @@ impl Aggregator {
             match sh.get_gradients_sum(depth, commitments, node_id).await {
                 Ok((x, y)) => shares.push(Share { x, y }),
                 Err(e) => {
-                    eprintln!("Warning: shareholder {} gradients_sum failed: {e}", sh.x_coord());
+                    tracing::warn!(shareholder = sh.x_coord(), "gradients_sum failed: {e}");
                     continue;
                 }
             }

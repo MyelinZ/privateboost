@@ -112,7 +112,7 @@ impl AggregatorServiceImpl {
 
 async fn run_training(state: Arc<SessionState>, config: Arc<AggregatorConfig>) {
     if let Err(e) = run_training_inner(&state, &config).await {
-        eprintln!("Training error: {e}");
+        tracing::error!("Training error: {e}");
     }
 }
 
