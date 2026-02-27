@@ -17,6 +17,7 @@ prost = "0.13"
 tokio = { version = "1", features = ["full"] }
 sha2 = "0.10"
 rand = "0.9"
+curve25519-dalek = { version = "4", features = ["rand_core"] }
 async-trait = "0.1"
 anyhow = "1"
 tracing = "0.1"
