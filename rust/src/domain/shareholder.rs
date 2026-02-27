@@ -4,13 +4,22 @@ use anyhow::bail;
 
 use crate::crypto::commitment::Commitment;
 use crate::crypto::shamir::Share;
-use crate::domain::model::{Depth, NodeId, StepId};
+use crate::domain::model::{Depth, NodeId, StepId, StepType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VoteStatus {
     Pending,
     Consensus,
     Disputed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    CollectingStats,
+    FrozenStats,
+    CollectingGradients,
+    FrozenGradients,
+    TrainingComplete,
 }
 
 pub struct ShareHolder {
@@ -24,6 +33,10 @@ pub struct ShareHolder {
     expected_aggregators: usize,
     votes: HashMap<StepId, HashMap<i32, (Vec<u8>, Vec<u8>)>>,
     consensus_results: HashMap<StepId, Vec<u8>>,
+    phase: Phase,
+    current_depth: i32,
+    n_trees: usize,
+    max_depth: usize,
 }
 
 impl ShareHolder {
@@ -39,6 +52,10 @@ impl ShareHolder {
             expected_aggregators: 1,
             votes: HashMap::new(),
             consensus_results: HashMap::new(),
+            phase: Phase::CollectingStats,
+            current_depth: 0,
+            n_trees: 0,
+            max_depth: 0,
         }
     }
 
@@ -61,8 +78,21 @@ impl ShareHolder {
         self.current_round_id
     }
 
+    pub fn phase(&self) -> Phase {
+        self.phase
+    }
+
+    pub fn current_depth(&self) -> i32 {
+        self.current_depth
+    }
+
     pub fn set_expected_aggregators(&mut self, n: usize) {
         self.expected_aggregators = n;
+    }
+
+    pub fn set_training_params(&mut self, n_trees: usize, max_depth: usize) {
+        self.n_trees = n_trees;
+        self.max_depth = max_depth;
     }
 
     pub fn receive_stats(&mut self, commitment: Commitment, share: Share) -> bool {
@@ -72,6 +102,7 @@ impl ShareHolder {
         self.stats.insert(commitment, share);
         if self.stats.len() >= self.target {
             self.stats_frozen = true;
+            self.phase = Phase::FrozenStats;
         }
         true
     }
@@ -101,6 +132,9 @@ impl ShareHolder {
         let commitment_count = self.gradients.get(&depth).map_or(0, |d| d.len());
         if commitment_count >= self.target {
             self.gradients_frozen.insert((round_id, depth), true);
+            if round_id == self.current_round_id && depth == self.current_depth {
+                self.phase = Phase::FrozenGradients;
+            }
         }
         true
     }
@@ -135,12 +169,41 @@ impl ShareHolder {
             if *max_count > self.expected_aggregators / 2 {
                 self.consensus_results
                     .insert(step, winning_data.to_vec());
+                self.advance_phase_on_consensus(step);
                 VoteStatus::Consensus
             } else {
                 VoteStatus::Disputed
             }
         } else {
             VoteStatus::Pending
+        }
+    }
+
+    fn advance_phase_on_consensus(&mut self, step: StepId) {
+        match step.step_type {
+            StepType::Stats => {
+                if self.phase == Phase::FrozenStats {
+                    self.phase = Phase::CollectingGradients;
+                    self.current_round_id = 0;
+                    self.current_depth = 0;
+                    self.gradients_frozen.clear();
+                }
+            }
+            StepType::Gradients => {
+                if step.round_id != self.current_round_id || step.depth != self.current_depth {
+                    return;
+                }
+                if (self.current_depth as usize) < self.max_depth - 1 {
+                    self.phase = Phase::CollectingGradients;
+                    self.current_depth += 1;
+                } else if (self.current_round_id as usize) < self.n_trees - 1 {
+                    self.phase = Phase::CollectingGradients;
+                    self.current_round_id += 1;
+                    self.current_depth = 0;
+                } else {
+                    self.phase = Phase::TrainingComplete;
+                }
+            }
         }
     }
 
@@ -438,5 +501,95 @@ mod tests {
         assert_eq!(sh.submit_vote(step, 0, vec![1u8; 32], b"a".to_vec()), VoteStatus::Pending);
         // Still only 1 vote counted, no consensus
         assert!(sh.get_consensus(step).is_none());
+    }
+
+    // --- Task 6: State machine tests ---
+
+    #[test]
+    fn test_state_machine_stats_flow() {
+        let mut sh = ShareHolder::new(2);
+        sh.set_target(2);
+        sh.set_expected_aggregators(1);
+        sh.set_training_params(3, 3);
+
+        assert_eq!(sh.phase(), Phase::CollectingStats);
+
+        // Submit stats until frozen
+        sh.receive_stats([1u8; 32], make_share(1, &[1.0]));
+        sh.receive_stats([2u8; 32], make_share(1, &[2.0]));
+        assert_eq!(sh.phase(), Phase::FrozenStats);
+
+        // Aggregator submits bins consensus
+        let step = StepId::stats();
+        sh.submit_vote(step, 0, vec![1u8; 32], b"bins".to_vec());
+        assert_eq!(sh.phase(), Phase::CollectingGradients);
+        assert_eq!(sh.current_round_id(), 0);
+        assert_eq!(sh.current_depth(), 0);
+    }
+
+    #[test]
+    fn test_state_machine_gradient_advance_depth() {
+        let mut sh = ShareHolder::new(2);
+        sh.set_target(2);
+        sh.set_expected_aggregators(1);
+        sh.set_training_params(3, 3); // 3 trees, max_depth 3
+
+        // Get to gradient phase
+        sh.receive_stats([1u8; 32], make_share(1, &[1.0]));
+        sh.receive_stats([2u8; 32], make_share(1, &[2.0]));
+        sh.submit_vote(StepId::stats(), 0, vec![1u8; 32], b"bins".to_vec());
+        assert_eq!(sh.phase(), Phase::CollectingGradients);
+
+        // Submit gradients until frozen
+        sh.receive_gradients(0, 0, [10u8; 32], make_share(1, &[1.0]), 0);
+        sh.receive_gradients(0, 0, [11u8; 32], make_share(1, &[2.0]), 0);
+        assert_eq!(sh.phase(), Phase::FrozenGradients);
+
+        // Aggregator submits splits consensus
+        sh.submit_vote(StepId::gradients(0, 0), 0, vec![1u8; 32], b"splits".to_vec());
+        // Advances to next depth
+        assert_eq!(sh.phase(), Phase::CollectingGradients);
+        assert_eq!(sh.current_depth(), 1);
+    }
+
+    #[test]
+    fn test_state_machine_round_advance() {
+        let mut sh = ShareHolder::new(2);
+        sh.set_target(2);
+        sh.set_expected_aggregators(1);
+        sh.set_training_params(2, 2); // 2 trees, max_depth 2
+
+        // Stats phase
+        sh.receive_stats([1u8; 32], make_share(1, &[1.0]));
+        sh.receive_stats([2u8; 32], make_share(1, &[2.0]));
+        sh.submit_vote(StepId::stats(), 0, vec![1u8; 32], b"bins".to_vec());
+
+        // Round 0, depth 0
+        sh.receive_gradients(0, 0, [10u8; 32], make_share(1, &[1.0]), 0);
+        sh.receive_gradients(0, 0, [11u8; 32], make_share(1, &[2.0]), 0);
+        sh.submit_vote(StepId::gradients(0, 0), 0, vec![1u8; 32], b"splits0".to_vec());
+
+        // Round 0, depth 1 (last depth)
+        sh.receive_gradients(0, 1, [20u8; 32], make_share(1, &[1.0]), 0);
+        sh.receive_gradients(0, 1, [21u8; 32], make_share(1, &[2.0]), 0);
+        sh.submit_vote(StepId::gradients(0, 1), 0, vec![1u8; 32], b"tree0".to_vec());
+
+        // Should advance to round 1
+        assert_eq!(sh.phase(), Phase::CollectingGradients);
+        assert_eq!(sh.current_round_id(), 1);
+        assert_eq!(sh.current_depth(), 0);
+
+        // Round 1, depth 0
+        sh.receive_gradients(1, 0, [30u8; 32], make_share(1, &[1.0]), 0);
+        sh.receive_gradients(1, 0, [31u8; 32], make_share(1, &[2.0]), 0);
+        sh.submit_vote(StepId::gradients(1, 0), 0, vec![1u8; 32], b"splits1".to_vec());
+
+        // Round 1, depth 1 (last depth, last round)
+        sh.receive_gradients(1, 1, [40u8; 32], make_share(1, &[1.0]), 0);
+        sh.receive_gradients(1, 1, [41u8; 32], make_share(1, &[2.0]), 0);
+        sh.submit_vote(StepId::gradients(1, 1), 0, vec![1u8; 32], b"tree1".to_vec());
+
+        // Should be training complete
+        assert_eq!(sh.phase(), Phase::TrainingComplete);
     }
 }
