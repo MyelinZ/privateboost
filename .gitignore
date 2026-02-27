@@ -31,3 +31,4 @@ node_modules/
 
 # Rust build artifacts
 rust/target/
+rust/logs/
