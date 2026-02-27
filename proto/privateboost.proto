@@ -18,7 +18,8 @@ message NdArray {
 
 message Share {
   int32 x = 1;
-  NdArray y = 2;
+  bytes scalars = 2;  // concatenated 32-byte Scalar values (little-endian)
+  int32 count = 3;    // number of Scalar values
 }
 
 // -- ShareholderService --
@@ -241,11 +242,13 @@ message TrainingConfig {
     int32 target_count = 10;
     float target_fraction = 11;
   }
+  double gradient_scale = 12;  // float-to-Scalar multiplier for gradient/hessian phase
 }
 
 message FeatureSpec {
   int32 index = 1;
   string name = 2;
+  double scale = 3;  // float-to-Scalar multiplier for stats phase
 }
 
 // -- Shared model messages --
