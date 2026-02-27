@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -15,13 +14,12 @@ use crate::proto::shareholder_service_client::ShareholderServiceClient;
 
 pub struct RemoteShareHolder {
     x: i32,
-    round_id: AtomicI32,
-    session_id: String,
+    run_id: String,
     client: tokio::sync::Mutex<ShareholderServiceClient<Channel>>,
 }
 
 impl RemoteShareHolder {
-    pub async fn connect(address: &str, x_coord: i32, session_id: String) -> Result<Self> {
+    pub async fn connect(address: &str, x_coord: i32, run_id: String) -> Result<Self> {
         let url = if address.starts_with("http://") || address.starts_with("https://") {
             address.to_string()
         } else {
@@ -30,24 +28,42 @@ impl RemoteShareHolder {
         let client = ShareholderServiceClient::connect(url).await?;
         Ok(Self {
             x: x_coord,
-            round_id: AtomicI32::new(0),
-            session_id,
+            run_id,
             client: tokio::sync::Mutex::new(client),
         })
     }
 
-    pub fn set_round_id(&self, round_id: i32) {
-        self.round_id.store(round_id, Ordering::Relaxed);
+    pub async fn get_run_state(&self, run_id: &str) -> Result<proto::GetRunStateResponse> {
+        let mut client = self.client.lock().await;
+        let resp = client
+            .get_run_state(proto::GetRunStateRequest {
+                run_id: run_id.to_string(),
+            })
+            .await?
+            .into_inner();
+        Ok(resp)
     }
 
-    pub async fn cancel_session(&self) -> Result<()> {
+    pub async fn submit_result(
+        &self,
+        run_id: &str,
+        step: &proto::StepId,
+        aggregator_id: i32,
+        result_hash: &[u8],
+        result: proto::submit_result_request::Result,
+    ) -> Result<bool> {
         let mut client = self.client.lock().await;
-        client
-            .cancel_session(crate::proto::CancelSessionRequest {
-                session_id: self.session_id.clone(),
+        let resp = client
+            .submit_result(proto::SubmitResultRequest {
+                run_id: run_id.to_string(),
+                step: Some(*step),
+                aggregator_id,
+                result_hash: result_hash.to_vec(),
+                result: Some(result),
             })
-            .await?;
-        Ok(())
+            .await?
+            .into_inner();
+        Ok(resp.consensus_reached)
     }
 }
 
@@ -98,7 +114,7 @@ impl ShareHolderClient for RemoteShareHolder {
         let mut client = self.client.lock().await;
         let resp = client
             .get_stats_commitments(proto::GetStatsCommitmentsRequest {
-                session_id: self.session_id.clone(),
+                run_id: self.run_id.clone(),
             })
             .await?
             .into_inner();
@@ -110,12 +126,11 @@ impl ShareHolderClient for RemoteShareHolder {
     }
 
     async fn get_gradient_commitments(&self, depth: Depth) -> Result<HashSet<Commitment>> {
-        let round_id = self.round_id.load(Ordering::Relaxed);
         let mut client = self.client.lock().await;
         let resp = client
             .get_gradient_commitments(proto::GetGradientCommitmentsRequest {
-                session_id: self.session_id.clone(),
-                round_id,
+                run_id: self.run_id.clone(),
+                round_id: 0,
                 depth,
             })
             .await?
@@ -128,12 +143,11 @@ impl ShareHolderClient for RemoteShareHolder {
     }
 
     async fn get_gradient_node_ids(&self, depth: Depth) -> Result<HashSet<NodeId>> {
-        let round_id = self.round_id.load(Ordering::Relaxed);
         let mut client = self.client.lock().await;
         let resp = client
             .get_gradient_node_ids(proto::GetGradientNodeIdsRequest {
-                session_id: self.session_id.clone(),
-                round_id,
+                run_id: self.run_id.clone(),
+                round_id: 0,
                 depth,
             })
             .await?
@@ -147,7 +161,7 @@ impl ShareHolderClient for RemoteShareHolder {
         let mut client = self.client.lock().await;
         let resp = client
             .get_stats_sum(proto::GetStatsSumRequest {
-                session_id: self.session_id.clone(),
+                run_id: self.run_id.clone(),
                 commitments: proto_commitments,
             })
             .await?
@@ -168,13 +182,12 @@ impl ShareHolderClient for RemoteShareHolder {
         commitments: &[Commitment],
         node_id: NodeId,
     ) -> Result<(i32, Vec<f64>)> {
-        let round_id = self.round_id.load(Ordering::Relaxed);
         let proto_commitments: Vec<Vec<u8>> = commitments.iter().map(|c| c.to_vec()).collect();
         let mut client = self.client.lock().await;
         let resp = client
             .get_gradients_sum(proto::GetGradientsSumRequest {
-                session_id: self.session_id.clone(),
-                round_id,
+                run_id: self.run_id.clone(),
+                round_id: 0,
                 depth,
                 commitments: proto_commitments,
                 node_id,
