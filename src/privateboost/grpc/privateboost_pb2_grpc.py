@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-from privateboost.grpc import privateboost_pb2 as privateboost__pb2
+import privateboost_pb2 as privateboost__pb2
 
-GRPC_GENERATED_VERSION = '1.78.0'
+GRPC_GENERATED_VERSION = '1.78.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -71,15 +71,30 @@ class ShareholderServiceStub(object):
                 request_serializer=privateboost__pb2.GetGradientsSumRequest.SerializeToString,
                 response_deserializer=privateboost__pb2.GetGradientsSumResponse.FromString,
                 _registered_method=True)
-        self.CancelSession = channel.unary_unary(
-                '/privateboost.ShareholderService/CancelSession',
-                request_serializer=privateboost__pb2.CancelSessionRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.CancelSessionResponse.FromString,
+        self.SubmitResult = channel.unary_unary(
+                '/privateboost.ShareholderService/SubmitResult',
+                request_serializer=privateboost__pb2.SubmitResultRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.SubmitResultResponse.FromString,
                 _registered_method=True)
-        self.Reset = channel.unary_unary(
-                '/privateboost.ShareholderService/Reset',
-                request_serializer=privateboost__pb2.ResetRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.ResetResponse.FromString,
+        self.GetConsensusBins = channel.unary_unary(
+                '/privateboost.ShareholderService/GetConsensusBins',
+                request_serializer=privateboost__pb2.GetConsensusBinsRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.GetConsensusBinsResponse.FromString,
+                _registered_method=True)
+        self.GetConsensusSplits = channel.unary_unary(
+                '/privateboost.ShareholderService/GetConsensusSplits',
+                request_serializer=privateboost__pb2.GetConsensusSplitsRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.GetConsensusSplitsResponse.FromString,
+                _registered_method=True)
+        self.GetConsensusModel = channel.unary_unary(
+                '/privateboost.ShareholderService/GetConsensusModel',
+                request_serializer=privateboost__pb2.GetConsensusModelRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.GetConsensusModelResponse.FromString,
+                _registered_method=True)
+        self.GetRunState = channel.unary_unary(
+                '/privateboost.ShareholderService/GetRunState',
+                request_serializer=privateboost__pb2.GetRunStateRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.GetRunStateResponse.FromString,
                 _registered_method=True)
 
 
@@ -130,13 +145,31 @@ class ShareholderServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CancelSession(self, request, context):
+    def SubmitResult(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def Reset(self, request, context):
+    def GetConsensusBins(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetConsensusSplits(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetConsensusModel(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetRunState(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -180,15 +213,30 @@ def add_ShareholderServiceServicer_to_server(servicer, server):
                     request_deserializer=privateboost__pb2.GetGradientsSumRequest.FromString,
                     response_serializer=privateboost__pb2.GetGradientsSumResponse.SerializeToString,
             ),
-            'CancelSession': grpc.unary_unary_rpc_method_handler(
-                    servicer.CancelSession,
-                    request_deserializer=privateboost__pb2.CancelSessionRequest.FromString,
-                    response_serializer=privateboost__pb2.CancelSessionResponse.SerializeToString,
+            'SubmitResult': grpc.unary_unary_rpc_method_handler(
+                    servicer.SubmitResult,
+                    request_deserializer=privateboost__pb2.SubmitResultRequest.FromString,
+                    response_serializer=privateboost__pb2.SubmitResultResponse.SerializeToString,
             ),
-            'Reset': grpc.unary_unary_rpc_method_handler(
-                    servicer.Reset,
-                    request_deserializer=privateboost__pb2.ResetRequest.FromString,
-                    response_serializer=privateboost__pb2.ResetResponse.SerializeToString,
+            'GetConsensusBins': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetConsensusBins,
+                    request_deserializer=privateboost__pb2.GetConsensusBinsRequest.FromString,
+                    response_serializer=privateboost__pb2.GetConsensusBinsResponse.SerializeToString,
+            ),
+            'GetConsensusSplits': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetConsensusSplits,
+                    request_deserializer=privateboost__pb2.GetConsensusSplitsRequest.FromString,
+                    response_serializer=privateboost__pb2.GetConsensusSplitsResponse.SerializeToString,
+            ),
+            'GetConsensusModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetConsensusModel,
+                    request_deserializer=privateboost__pb2.GetConsensusModelRequest.FromString,
+                    response_serializer=privateboost__pb2.GetConsensusModelResponse.SerializeToString,
+            ),
+            'GetRunState': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRunState,
+                    request_deserializer=privateboost__pb2.GetRunStateRequest.FromString,
+                    response_serializer=privateboost__pb2.GetRunStateResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -393,7 +441,7 @@ class ShareholderService(object):
             _registered_method=True)
 
     @staticmethod
-    def CancelSession(request,
+    def SubmitResult(request,
             target,
             options=(),
             channel_credentials=None,
@@ -406,9 +454,9 @@ class ShareholderService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/privateboost.ShareholderService/CancelSession',
-            privateboost__pb2.CancelSessionRequest.SerializeToString,
-            privateboost__pb2.CancelSessionResponse.FromString,
+            '/privateboost.ShareholderService/SubmitResult',
+            privateboost__pb2.SubmitResultRequest.SerializeToString,
+            privateboost__pb2.SubmitResultResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -420,7 +468,7 @@ class ShareholderService(object):
             _registered_method=True)
 
     @staticmethod
-    def Reset(request,
+    def GetConsensusBins(request,
             target,
             options=(),
             channel_credentials=None,
@@ -433,9 +481,90 @@ class ShareholderService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/privateboost.ShareholderService/Reset',
-            privateboost__pb2.ResetRequest.SerializeToString,
-            privateboost__pb2.ResetResponse.FromString,
+            '/privateboost.ShareholderService/GetConsensusBins',
+            privateboost__pb2.GetConsensusBinsRequest.SerializeToString,
+            privateboost__pb2.GetConsensusBinsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetConsensusSplits(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/privateboost.ShareholderService/GetConsensusSplits',
+            privateboost__pb2.GetConsensusSplitsRequest.SerializeToString,
+            privateboost__pb2.GetConsensusSplitsResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetConsensusModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/privateboost.ShareholderService/GetConsensusModel',
+            privateboost__pb2.GetConsensusModelRequest.SerializeToString,
+            privateboost__pb2.GetConsensusModelResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetRunState(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/privateboost.ShareholderService/GetRunState',
+            privateboost__pb2.GetRunStateRequest.SerializeToString,
+            privateboost__pb2.GetRunStateResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -447,8 +576,8 @@ class ShareholderService(object):
             _registered_method=True)
 
 
-class AggregatorServiceStub(object):
-    """-- AggregatorService --
+class CoordinatorServiceStub(object):
+    """-- CoordinatorService --
 
     """
 
@@ -458,111 +587,95 @@ class AggregatorServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.JoinSession = channel.unary_unary(
-                '/privateboost.AggregatorService/JoinSession',
-                request_serializer=privateboost__pb2.JoinSessionRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.JoinSessionResponse.FromString,
+        self.CreateRun = channel.unary_unary(
+                '/privateboost.CoordinatorService/CreateRun',
+                request_serializer=privateboost__pb2.CreateRunRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.CreateRunResponse.FromString,
                 _registered_method=True)
-        self.CancelSession = channel.unary_unary(
-                '/privateboost.AggregatorService/CancelSession',
-                request_serializer=privateboost__pb2.CancelSessionRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.CancelSessionResponse.FromString,
+        self.CancelRun = channel.unary_unary(
+                '/privateboost.CoordinatorService/CancelRun',
+                request_serializer=privateboost__pb2.CancelRunRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.CancelRunResponse.FromString,
                 _registered_method=True)
-        self.GetRoundState = channel.unary_unary(
-                '/privateboost.AggregatorService/GetRoundState',
-                request_serializer=privateboost__pb2.GetRoundStateRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.GetRoundStateResponse.FromString,
+        self.ListRuns = channel.unary_unary(
+                '/privateboost.CoordinatorService/ListRuns',
+                request_serializer=privateboost__pb2.ListRunsRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.ListRunsResponse.FromString,
                 _registered_method=True)
-        self.GetTrainingState = channel.unary_unary(
-                '/privateboost.AggregatorService/GetTrainingState',
-                request_serializer=privateboost__pb2.GetTrainingStateRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.GetTrainingStateResponse.FromString,
-                _registered_method=True)
-        self.GetModel = channel.unary_unary(
-                '/privateboost.AggregatorService/GetModel',
-                request_serializer=privateboost__pb2.GetModelRequest.SerializeToString,
-                response_deserializer=privateboost__pb2.GetModelResponse.FromString,
+        self.GetRunConfig = channel.unary_unary(
+                '/privateboost.CoordinatorService/GetRunConfig',
+                request_serializer=privateboost__pb2.GetRunConfigRequest.SerializeToString,
+                response_deserializer=privateboost__pb2.GetRunConfigResponse.FromString,
                 _registered_method=True)
 
 
-class AggregatorServiceServicer(object):
-    """-- AggregatorService --
+class CoordinatorServiceServicer(object):
+    """-- CoordinatorService --
 
     """
 
-    def JoinSession(self, request, context):
+    def CreateRun(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def CancelSession(self, request, context):
+    def CancelRun(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetRoundState(self, request, context):
+    def ListRuns(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def GetTrainingState(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetModel(self, request, context):
+    def GetRunConfig(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
 
-def add_AggregatorServiceServicer_to_server(servicer, server):
+def add_CoordinatorServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'JoinSession': grpc.unary_unary_rpc_method_handler(
-                    servicer.JoinSession,
-                    request_deserializer=privateboost__pb2.JoinSessionRequest.FromString,
-                    response_serializer=privateboost__pb2.JoinSessionResponse.SerializeToString,
+            'CreateRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.CreateRun,
+                    request_deserializer=privateboost__pb2.CreateRunRequest.FromString,
+                    response_serializer=privateboost__pb2.CreateRunResponse.SerializeToString,
             ),
-            'CancelSession': grpc.unary_unary_rpc_method_handler(
-                    servicer.CancelSession,
-                    request_deserializer=privateboost__pb2.CancelSessionRequest.FromString,
-                    response_serializer=privateboost__pb2.CancelSessionResponse.SerializeToString,
+            'CancelRun': grpc.unary_unary_rpc_method_handler(
+                    servicer.CancelRun,
+                    request_deserializer=privateboost__pb2.CancelRunRequest.FromString,
+                    response_serializer=privateboost__pb2.CancelRunResponse.SerializeToString,
             ),
-            'GetRoundState': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetRoundState,
-                    request_deserializer=privateboost__pb2.GetRoundStateRequest.FromString,
-                    response_serializer=privateboost__pb2.GetRoundStateResponse.SerializeToString,
+            'ListRuns': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListRuns,
+                    request_deserializer=privateboost__pb2.ListRunsRequest.FromString,
+                    response_serializer=privateboost__pb2.ListRunsResponse.SerializeToString,
             ),
-            'GetTrainingState': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetTrainingState,
-                    request_deserializer=privateboost__pb2.GetTrainingStateRequest.FromString,
-                    response_serializer=privateboost__pb2.GetTrainingStateResponse.SerializeToString,
-            ),
-            'GetModel': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetModel,
-                    request_deserializer=privateboost__pb2.GetModelRequest.FromString,
-                    response_serializer=privateboost__pb2.GetModelResponse.SerializeToString,
+            'GetRunConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetRunConfig,
+                    request_deserializer=privateboost__pb2.GetRunConfigRequest.FromString,
+                    response_serializer=privateboost__pb2.GetRunConfigResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'privateboost.AggregatorService', rpc_method_handlers)
+            'privateboost.CoordinatorService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('privateboost.AggregatorService', rpc_method_handlers)
+    server.add_registered_method_handlers('privateboost.CoordinatorService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
-class AggregatorService(object):
-    """-- AggregatorService --
+class CoordinatorService(object):
+    """-- CoordinatorService --
 
     """
 
     @staticmethod
-    def JoinSession(request,
+    def CreateRun(request,
             target,
             options=(),
             channel_credentials=None,
@@ -575,9 +688,9 @@ class AggregatorService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/privateboost.AggregatorService/JoinSession',
-            privateboost__pb2.JoinSessionRequest.SerializeToString,
-            privateboost__pb2.JoinSessionResponse.FromString,
+            '/privateboost.CoordinatorService/CreateRun',
+            privateboost__pb2.CreateRunRequest.SerializeToString,
+            privateboost__pb2.CreateRunResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -589,7 +702,7 @@ class AggregatorService(object):
             _registered_method=True)
 
     @staticmethod
-    def CancelSession(request,
+    def CancelRun(request,
             target,
             options=(),
             channel_credentials=None,
@@ -602,9 +715,9 @@ class AggregatorService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/privateboost.AggregatorService/CancelSession',
-            privateboost__pb2.CancelSessionRequest.SerializeToString,
-            privateboost__pb2.CancelSessionResponse.FromString,
+            '/privateboost.CoordinatorService/CancelRun',
+            privateboost__pb2.CancelRunRequest.SerializeToString,
+            privateboost__pb2.CancelRunResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -616,7 +729,7 @@ class AggregatorService(object):
             _registered_method=True)
 
     @staticmethod
-    def GetRoundState(request,
+    def ListRuns(request,
             target,
             options=(),
             channel_credentials=None,
@@ -629,9 +742,9 @@ class AggregatorService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/privateboost.AggregatorService/GetRoundState',
-            privateboost__pb2.GetRoundStateRequest.SerializeToString,
-            privateboost__pb2.GetRoundStateResponse.FromString,
+            '/privateboost.CoordinatorService/ListRuns',
+            privateboost__pb2.ListRunsRequest.SerializeToString,
+            privateboost__pb2.ListRunsResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -643,7 +756,7 @@ class AggregatorService(object):
             _registered_method=True)
 
     @staticmethod
-    def GetTrainingState(request,
+    def GetRunConfig(request,
             target,
             options=(),
             channel_credentials=None,
@@ -656,36 +769,9 @@ class AggregatorService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/privateboost.AggregatorService/GetTrainingState',
-            privateboost__pb2.GetTrainingStateRequest.SerializeToString,
-            privateboost__pb2.GetTrainingStateResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetModel(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/privateboost.AggregatorService/GetModel',
-            privateboost__pb2.GetModelRequest.SerializeToString,
-            privateboost__pb2.GetModelResponse.FromString,
+            '/privateboost.CoordinatorService/GetRunConfig',
+            privateboost__pb2.GetRunConfigRequest.SerializeToString,
+            privateboost__pb2.GetRunConfigResponse.FromString,
             options,
             channel_credentials,
             insecure,

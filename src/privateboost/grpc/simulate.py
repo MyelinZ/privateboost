@@ -1,8 +1,15 @@
-"""Simulation script: runs the full federated XGBoost protocol over gRPC."""
+"""Simulation script: runs the full federated XGBoost protocol over gRPC.
+
+New multi-aggregator protocol:
+  1. Coordinator creates a run
+  2. Clients submit stats/gradients to shareholders
+  3. Aggregators independently compute results and submit to shareholders
+  4. Shareholders vote on consensus
+  5. Clients poll shareholders for consensus results
+"""
 
 import os
 import time
-import uuid
 
 import grpc
 import numpy as np
@@ -39,28 +46,27 @@ def _load_heart_disease() -> pd.DataFrame:
 
 
 def main():
-    aggregator_addr = os.environ.get("AGGREGATOR", "localhost:50052")
-    session_id = os.environ.get("SESSION_ID", str(uuid.uuid4()))
+    coordinator_addr = os.environ.get("COORDINATOR", "localhost:50053")
+    shareholder_addrs = os.environ.get(
+        "SHAREHOLDERS", "localhost:50051,localhost:50052,localhost:50053"
+    ).split(",")
+    n_trees = int(os.environ.get("N_TREES", "3"))
+    max_depth = int(os.environ.get("MAX_DEPTH", "3"))
+    learning_rate = float(os.environ.get("LEARNING_RATE", "0.15"))
+    lambda_reg = float(os.environ.get("LAMBDA_REG", "2.0"))
+    n_bins = int(os.environ.get("N_BINS", "10"))
+    min_clients = int(os.environ.get("MIN_CLIENTS", "0"))
+    loss = os.environ.get("LOSS", "logistic")
+    threshold = int(os.environ.get("THRESHOLD", "2"))
 
-    print(f"Connecting to aggregator at {aggregator_addr}")
-    print(f"Session ID: {session_id}")
+    print(f"Connecting to coordinator at {coordinator_addr}")
+    print(f"Shareholders: {shareholder_addrs}")
 
-    channel = grpc.insecure_channel(aggregator_addr)
-    stub = pb_grpc.AggregatorServiceStub(channel)
+    # Create run via coordinator
+    coord_channel = grpc.insecure_channel(coordinator_addr)
+    coord_stub = pb_grpc.CoordinatorServiceStub(coord_channel)
 
-    # Join session
-    join_resp = stub.JoinSession(pb.JoinSessionRequest(session_id=session_id))
-    sh_addresses = [sh.address for sh in join_resp.shareholders]
-    threshold = join_resp.threshold
-    config = join_resp.config
-    print(
-        f"Joined session with {len(sh_addresses)} shareholders, threshold={threshold}"
-    )
-    print(
-        f"Config: {config.n_trees} trees, depth {config.max_depth}, lr={config.learning_rate}"
-    )
-
-    # Load dataset
+    # Load dataset first to know how many clients we have
     print("Loading Heart Disease dataset...")
     df = _load_heart_disease()
     np.random.seed(42)
@@ -70,6 +76,32 @@ def main():
     df_test = df.iloc[split_idx:]
     print(f"Train: {len(df_train)} samples, Test: {len(df_test)} samples")
 
+    target_count = min_clients if min_clients > 0 else len(df_train)
+
+    config = pb.TrainingConfig(
+        features=[pb.FeatureSpec(index=i, name=f) for i, f in enumerate(FEATURES)],
+        target_column="target",
+        loss=loss,
+        n_bins=n_bins,
+        n_trees=n_trees,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        lambda_reg=lambda_reg,
+        min_clients=target_count,
+        target_count=target_count,
+    )
+
+    resp = coord_stub.CreateRun(pb.CreateRunRequest(config=config))
+    run_id = resp.run_id
+    print(f"Created run: {run_id}")
+    print(
+        f"Config: {n_trees} trees, depth {max_depth}, lr={learning_rate}, loss={loss}"
+    )
+
+    # Connect to a shareholder for polling
+    sh_channel = grpc.insecure_channel(shareholder_addrs[0])
+    sh_stub = pb_grpc.ShareholderServiceStub(sh_channel)
+
     # Create clients
     clients = []
     for idx, row in df_train.iterrows():
@@ -78,8 +110,8 @@ def main():
                 client_id=f"client_{idx}",
                 features=row[FEATURES].values.astype(float),
                 target=float(row["target"]),
-                session_id=session_id,
-                shareholder_addresses=sh_addresses,
+                run_id=run_id,
+                shareholder_addresses=shareholder_addrs,
                 threshold=threshold,
             )
         )
@@ -92,51 +124,91 @@ def main():
             print(f"  {i + 1}/{len(clients)} clients submitted stats")
     print(f"All {len(clients)} clients submitted stats")
 
-    # Wait for training to start
-    print("Waiting for aggregator to compute bins...")
+    # Wait for stats to freeze and bins consensus
+    print("Waiting for bins consensus...")
     while True:
-        state = stub.GetRoundState(pb.GetRoundStateRequest(session_id=session_id))
+        state = sh_stub.GetRunState(pb.GetRunStateRequest(run_id=run_id))
         if state.phase == pb.COLLECTING_GRADIENTS:
             break
+        if state.phase == pb.TRAINING_COMPLETE:
+            print("Training completed early (during stats phase)")
+            return
         time.sleep(0.5)
-    print("Bins computed, starting gradient rounds")
+
+    # Fetch consensus bins
+    bins_resp = sh_stub.GetConsensusBins(pb.GetConsensusBinsRequest(run_id=run_id))
+    bins = [pb_to_bin_config(b) for b in bins_resp.bins]
+    initial_prediction = bins_resp.initial_prediction
+    print(
+        f"Bins computed ({len(bins)} features), initial_prediction={initial_prediction:.4f}"
+    )
+
+    # Build initial model (no trees yet)
+    from privateboost.tree import Model
+
+    model = Model(
+        initial_prediction=initial_prediction,
+        learning_rate=learning_rate,
+        trees=[],
+    )
 
     # Training loop
     current_round = -1
     current_depth = -1
+    splits: dict[int, object] = {}
+
     while True:
-        state = stub.GetRoundState(pb.GetRoundStateRequest(session_id=session_id))
+        state = sh_stub.GetRunState(pb.GetRunStateRequest(run_id=run_id))
         if state.phase == pb.TRAINING_COMPLETE:
             break
 
-        if state.round_id == current_round and state.depth == current_depth:
-            time.sleep(0.1)
-            continue
+        # Waiting for gradients to be needed
+        if state.phase in (pb.COLLECTING_GRADIENTS, pb.FROZEN_STATS):
+            if state.round_id == current_round and state.depth == current_depth:
+                time.sleep(0.1)
+                continue
 
-        current_round = state.round_id
-        current_depth = state.depth
-        print(f"  Round {current_round}, depth {current_depth}")
+            current_round = state.round_id
+            current_depth = state.depth
 
-        ts = stub.GetTrainingState(pb.GetTrainingStateRequest(session_id=session_id))
-        model = pb_to_model(ts.model)
-        bins = [pb_to_bin_config(b) for b in ts.bins]
-        splits = {
-            nid: pb_to_split_decision(sd) for nid, sd in ts.current_splits.items()
-        }
+            # Fetch latest splits for navigation
+            if current_depth > 0:
+                splits_resp = sh_stub.GetConsensusSplits(
+                    pb.GetConsensusSplitsRequest(
+                        run_id=run_id,
+                        round_id=current_round,
+                        depth=current_depth - 1,
+                    )
+                )
+                if splits_resp.ready:
+                    for nid, sd in splits_resp.splits.items():
+                        splits[nid] = pb_to_split_decision(sd)
+            elif current_round > 0:
+                # New round: fetch model with previous trees, reset splits
+                model_resp = sh_stub.GetConsensusModel(
+                    pb.GetConsensusModelRequest(run_id=run_id)
+                )
+                if model_resp.model and model_resp.model.trees:
+                    model = pb_to_model(model_resp.model)
+                splits = {}
 
-        for client in clients:
-            client.submit_gradients(
-                bins=bins,
-                model=model,
-                splits=splits,
-                round_id=current_round,
-                depth=current_depth,
-                loss=config.loss,
-            )
+            print(f"  Round {current_round}, depth {current_depth}")
+
+            for client in clients:
+                client.submit_gradients(
+                    bins=bins,
+                    model=model,
+                    splits=splits,
+                    round_id=current_round,
+                    depth=current_depth,
+                    loss=loss,
+                )
+        else:
+            time.sleep(0.2)
 
     # Fetch final model
     print("Training complete, fetching model...")
-    model_resp = stub.GetModel(pb.GetModelRequest(session_id=session_id))
+    model_resp = sh_stub.GetConsensusModel(pb.GetConsensusModelRequest(run_id=run_id))
     final_model = pb_to_model(model_resp.model)
     print(f"Model has {len(final_model.trees)} trees")
 
@@ -152,7 +224,8 @@ def main():
     # Cleanup
     for client in clients:
         client.close()
-    channel.close()
+    sh_channel.close()
+    coord_channel.close()
 
 
 if __name__ == "__main__":

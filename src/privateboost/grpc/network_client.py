@@ -23,14 +23,14 @@ class NetworkClient:
         client_id: str,
         features: np.ndarray,
         target: float,
-        session_id: str,
+        run_id: str,
         shareholder_addresses: list[str],
         threshold: int = 2,
     ):
         self.client_id = client_id
         self.features = np.asarray(features)
         self.target = target
-        self.session_id = session_id
+        self.run_id = run_id
         self.threshold = threshold
         self._n_parties = len(shareholder_addresses)
         # Fixed nonce for stats: same client always produces the same commitment
@@ -42,7 +42,7 @@ class NetworkClient:
         self._stubs = [pb_grpc.ShareholderServiceStub(ch) for ch in self._channels]
 
     def _stats_commitment(self) -> bytes:
-        return compute_commitment(0, self.session_id, self._stats_nonce)
+        return compute_commitment(0, self.run_id, self._stats_nonce)
 
     def submit_stats(self) -> None:
         commitment = self._stats_commitment()
@@ -53,7 +53,7 @@ class NetworkClient:
         for stub, s in zip(self._stubs, shares):
             stub.SubmitStats(
                 pb.SubmitStatsRequest(
-                    session_id=self.session_id,
+                    run_id=self.run_id,
                     commitment=commitment,
                     share=share_to_pb(s),
                 )
@@ -102,7 +102,7 @@ class NetworkClient:
         for stub, s in zip(self._stubs, shares):
             stub.SubmitGradients(
                 pb.SubmitGradientsRequest(
-                    session_id=self.session_id,
+                    run_id=self.run_id,
                     round_id=round_id,
                     depth=depth,
                     commitment=commitment,
