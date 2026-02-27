@@ -8,8 +8,11 @@ use crate::domain::model::{Depth, NodeId};
 
 pub struct ShareHolder {
     pub min_clients: usize,
+    target: usize,
     stats: HashMap<Commitment, Share>,
+    stats_frozen: bool,
     gradients: HashMap<Depth, HashMap<Commitment, HashMap<NodeId, Share>>>,
+    gradients_frozen: HashMap<(i32, i32), bool>,
     current_round_id: i32,
 }
 
@@ -17,18 +20,43 @@ impl ShareHolder {
     pub fn new(min_clients: usize) -> Self {
         Self {
             min_clients,
+            target: min_clients,
             stats: HashMap::new(),
+            stats_frozen: false,
             gradients: HashMap::new(),
+            gradients_frozen: HashMap::new(),
             current_round_id: -1,
         }
+    }
+
+    pub fn set_target(&mut self, target: usize) {
+        self.target = target;
+    }
+
+    pub fn is_stats_frozen(&self) -> bool {
+        self.stats_frozen
+    }
+
+    pub fn is_gradients_frozen(&self, round_id: i32, depth: i32) -> bool {
+        self.gradients_frozen
+            .get(&(round_id, depth))
+            .copied()
+            .unwrap_or(false)
     }
 
     pub fn current_round_id(&self) -> i32 {
         self.current_round_id
     }
 
-    pub fn receive_stats(&mut self, commitment: Commitment, share: Share) {
+    pub fn receive_stats(&mut self, commitment: Commitment, share: Share) -> bool {
+        if self.stats_frozen {
+            return false;
+        }
         self.stats.insert(commitment, share);
+        if self.stats.len() >= self.target {
+            self.stats_frozen = true;
+        }
+        true
     }
 
     pub fn receive_gradients(
@@ -38,7 +66,10 @@ impl ShareHolder {
         commitment: Commitment,
         share: Share,
         node_id: NodeId,
-    ) {
+    ) -> bool {
+        if self.is_gradients_frozen(round_id, depth) {
+            return false;
+        }
         if round_id > self.current_round_id {
             self.gradients.clear();
             self.current_round_id = round_id;
@@ -49,6 +80,12 @@ impl ShareHolder {
             .entry(commitment)
             .or_default()
             .insert(node_id, share);
+
+        let commitment_count = self.gradients.get(&depth).map_or(0, |d| d.len());
+        if commitment_count >= self.target {
+            self.gradients_frozen.insert((round_id, depth), true);
+        }
+        true
     }
 
     pub fn get_stats_commitments(&self) -> HashSet<Commitment> {
@@ -153,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_receive_and_get_stats() {
-        let mut sh = ShareHolder::new(1);
+        let mut sh = ShareHolder::new(2);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
         sh.receive_stats(c1, make_share(1, &[10.0, 20.0]));
@@ -196,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_gradients_sum() {
-        let mut sh = ShareHolder::new(1);
+        let mut sh = ShareHolder::new(2);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
         sh.receive_gradients(0, 0, c1, make_share(1, &[5.0, 10.0]), 0);
@@ -215,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_gradient_node_ids() {
-        let mut sh = ShareHolder::new(1);
+        let mut sh = ShareHolder::new(3);
         let c1 = [1u8; 32];
         let c2 = [2u8; 32];
         sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
@@ -255,5 +292,50 @@ mod tests {
         let c1 = [1u8; 32];
         sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0);
         assert!(sh.get_gradients_sum(0, &[c1], 0).is_err());
+    }
+
+    // --- Task 4: Freeze tests ---
+
+    #[test]
+    fn test_stats_freeze() {
+        let mut sh = ShareHolder::new(2);
+        assert!(!sh.is_stats_frozen());
+        let c1 = [1u8; 32];
+        let c2 = [2u8; 32];
+        assert!(sh.receive_stats(c1, make_share(1, &[1.0])));
+        assert!(!sh.is_stats_frozen());
+        assert!(sh.receive_stats(c2, make_share(1, &[2.0])));
+        // 2 commitments >= min_clients=2, should auto-freeze
+        assert!(sh.is_stats_frozen());
+        // Subsequent submissions rejected
+        let c3 = [3u8; 32];
+        assert!(!sh.receive_stats(c3, make_share(1, &[3.0])));
+        assert_eq!(sh.get_stats_commitments().len(), 2);
+    }
+
+    #[test]
+    fn test_gradients_freeze() {
+        let mut sh = ShareHolder::new(2);
+        let c1 = [1u8; 32];
+        let c2 = [2u8; 32];
+        let c3 = [3u8; 32];
+        assert!(sh.receive_gradients(0, 0, c1, make_share(1, &[1.0]), 0));
+        assert!(!sh.is_gradients_frozen(0, 0));
+        assert!(sh.receive_gradients(0, 0, c2, make_share(1, &[2.0]), 0));
+        assert!(sh.is_gradients_frozen(0, 0));
+        // Rejected after freeze
+        assert!(!sh.receive_gradients(0, 0, c3, make_share(1, &[3.0]), 0));
+    }
+
+    #[test]
+    fn test_freeze_with_custom_target() {
+        let mut sh = ShareHolder::new(2);
+        sh.set_target(5); // freeze at 5, not min_clients
+        for i in 0u8..4 {
+            assert!(sh.receive_stats([i; 32], make_share(1, &[1.0])));
+        }
+        assert!(!sh.is_stats_frozen());
+        assert!(sh.receive_stats([4u8; 32], make_share(1, &[5.0])));
+        assert!(sh.is_stats_frozen());
     }
 }
