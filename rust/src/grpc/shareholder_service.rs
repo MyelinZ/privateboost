@@ -9,6 +9,8 @@ use crate::domain::shareholder::ShareHolder;
 use crate::grpc::{ndarray_to_vec, vec_to_ndarray};
 use crate::proto;
 
+const MAX_CANCELLED_SESSIONS: usize = 10_000;
+
 pub struct ShareholderServiceImpl {
     min_clients: usize,
     sessions: Arc<Mutex<HashMap<String, Arc<RwLock<ShareHolder>>>>>,
@@ -214,6 +216,9 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
     ) -> Result<Response<proto::CancelSessionResponse>, Status> {
         let req = request.into_inner();
         let mut cancelled = self.cancelled.lock().await;
+        if cancelled.len() >= MAX_CANCELLED_SESSIONS {
+            cancelled.clear();
+        }
         cancelled.insert(req.session_id.clone());
         drop(cancelled);
         let mut sessions = self.sessions.lock().await;
