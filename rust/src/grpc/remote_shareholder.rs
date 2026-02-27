@@ -9,6 +9,7 @@ use tonic::transport::Channel;
 use crate::crypto::commitment::Commitment;
 use crate::domain::aggregator::ShareHolderClient;
 use crate::domain::model::{Depth, NodeId};
+use crate::grpc::ndarray_to_vec;
 use crate::proto;
 use crate::proto::shareholder_service_client::ShareholderServiceClient;
 
@@ -48,13 +49,6 @@ impl RemoteShareHolder {
             .await?;
         Ok(())
     }
-}
-
-fn ndarray_to_vec(arr: &proto::NdArray) -> Vec<f64> {
-    arr.data
-        .chunks_exact(8)
-        .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
-        .collect()
 }
 
 fn bytes_to_commitment(b: &[u8]) -> Result<Commitment> {

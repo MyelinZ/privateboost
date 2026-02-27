@@ -1,3 +1,4 @@
+use anyhow::{bail, Result};
 use rand::Rng;
 
 #[derive(Debug, Clone)]
@@ -12,8 +13,10 @@ pub struct Share {
 /// 1. Build coefficient matrix: row 0 = values, rows 1..threshold-1 = random
 /// 2. Build Vandermonde matrix: vander[party][k] = (party+1)^k
 /// 3. y_matrix = vander @ coeffs
-pub fn share(values: &[f64], n_parties: usize, threshold: usize) -> Vec<Share> {
-    assert!(threshold <= n_parties, "threshold cannot exceed n_parties");
+pub fn share(values: &[f64], n_parties: usize, threshold: usize) -> Result<Vec<Share>> {
+    if threshold > n_parties {
+        bail!("threshold {threshold} cannot exceed n_parties {n_parties}");
+    }
     let n_values = values.len();
     let mut rng = rand::rng();
 
@@ -46,16 +49,17 @@ pub fn share(values: &[f64], n_parties: usize, threshold: usize) -> Vec<Share> {
         shares.push(Share { x, y });
     }
 
-    shares
+    Ok(shares)
 }
 
 /// Reconstruct values from threshold shares using Lagrange interpolation at x=0.
-pub fn reconstruct(shares: &[Share], threshold: usize) -> Vec<f64> {
-    assert!(
-        shares.len() >= threshold,
-        "need at least {threshold} shares, got {}",
-        shares.len()
-    );
+pub fn reconstruct(shares: &[Share], threshold: usize) -> Result<Vec<f64>> {
+    if shares.len() < threshold {
+        bail!(
+            "need at least {threshold} shares, got {}",
+            shares.len()
+        );
+    }
     let shares = &shares[..threshold];
     let n_values = shares[0].y.len();
 
@@ -79,7 +83,7 @@ pub fn reconstruct(shares: &[Share], threshold: usize) -> Vec<f64> {
         }
     }
 
-    result
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -89,9 +93,9 @@ mod tests {
     #[test]
     fn test_shamir_reconstruction() {
         let values = vec![42.0, -17.5, 100.0];
-        let shares = share(&values, 3, 2);
+        let shares = share(&values, 3, 2).unwrap();
         assert_eq!(shares.len(), 3);
-        let result = reconstruct(&shares[..2], 2);
+        let result = reconstruct(&shares[..2], 2).unwrap();
         for (a, b) in values.iter().zip(result.iter()) {
             assert!((a - b).abs() < 1e-6, "expected {a}, got {b}");
         }
@@ -101,8 +105,8 @@ mod tests {
     fn test_shamir_linearity() {
         let v1 = vec![10.0, 20.0];
         let v2 = vec![30.0, 40.0];
-        let s1 = share(&v1, 3, 2);
-        let s2 = share(&v2, 3, 2);
+        let s1 = share(&v1, 3, 2).unwrap();
+        let s2 = share(&v2, 3, 2).unwrap();
         // Sum shares element-wise per party
         let summed: Vec<Share> = s1
             .iter()
@@ -112,7 +116,7 @@ mod tests {
                 y: a.y.iter().zip(b.y.iter()).map(|(x, y)| x + y).collect(),
             })
             .collect();
-        let result = reconstruct(&summed[..2], 2);
+        let result = reconstruct(&summed[..2], 2).unwrap();
         assert!((result[0] - 40.0).abs() < 1e-6);
         assert!((result[1] - 60.0).abs() < 1e-6);
     }
@@ -120,12 +124,11 @@ mod tests {
     #[test]
     fn test_3_of_5_threshold() {
         let values = vec![99.0];
-        let shares = share(&values, 5, 3);
+        let shares = share(&values, 5, 3).unwrap();
         assert_eq!(shares.len(), 5);
-        // Any 3 shares should reconstruct (tolerance relaxed: Lagrange coefficients
-        // for x=2,3,4 are (6,-8,3), amplifying 1e10 random coefficients to ~1e12,
-        // which exceeds f64 precision at 1e-6)
-        let result = reconstruct(&shares[1..4], 3);
+        // Tolerance relaxed: Lagrange coefficients for x=2,3,4 are (6,-8,3),
+        // amplifying 1e10 random coefficients to ~1e12, exceeding f64 precision at 1e-6
+        let result = reconstruct(&shares[1..4], 3).unwrap();
         assert!((result[0] - 99.0).abs() < 1e-2, "got {}", result[0]);
     }
 }

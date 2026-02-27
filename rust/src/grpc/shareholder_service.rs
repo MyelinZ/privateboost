@@ -6,6 +6,7 @@ use tonic::{Request, Response, Status};
 
 use crate::crypto::shamir::Share;
 use crate::domain::shareholder::ShareHolder;
+use crate::grpc::{ndarray_to_vec, vec_to_ndarray};
 use crate::proto;
 
 pub struct ShareholderServiceImpl {
@@ -62,28 +63,17 @@ impl ShareholderServiceImpl {
     }
 }
 
-fn share_from_proto(proto_share: &proto::Share) -> Share {
-    let y = ndarray_to_vec(proto_share.y.as_ref().expect("Share must have y"));
-    Share {
+#[allow(clippy::result_large_err)]
+fn share_from_proto(proto_share: &proto::Share) -> Result<Share, Status> {
+    let y_arr = proto_share
+        .y
+        .as_ref()
+        .ok_or_else(|| Status::invalid_argument("Share must have y field"))?;
+    let y = ndarray_to_vec(y_arr);
+    Ok(Share {
         x: proto_share.x,
         y,
-    }
-}
-
-fn vec_to_ndarray(values: &[f64]) -> proto::NdArray {
-    let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-    proto::NdArray {
-        dtype: proto::DType::Float64 as i32,
-        shape: vec![values.len() as i64],
-        data: bytes,
-    }
-}
-
-fn ndarray_to_vec(arr: &proto::NdArray) -> Vec<f64> {
-    arr.data
-        .chunks_exact(8)
-        .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
-        .collect()
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -105,7 +95,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
             req.share
                 .as_ref()
                 .ok_or_else(|| Status::invalid_argument("missing share"))?,
-        );
+        )?;
         let commitment = bytes_to_commitment(&req.commitment)?;
         let mut sh = sh.write().await;
         sh.receive_stats(commitment, share);
@@ -122,7 +112,7 @@ impl proto::shareholder_service_server::ShareholderService for ShareholderServic
             req.share
                 .as_ref()
                 .ok_or_else(|| Status::invalid_argument("missing share"))?,
-        );
+        )?;
         let commitment = bytes_to_commitment(&req.commitment)?;
         let mut sh = sh.write().await;
         sh.receive_gradients(req.round_id, req.depth, commitment, share, req.node_id);

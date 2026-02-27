@@ -137,7 +137,10 @@ impl Aggregator {
             let sh = &self.shareholders[idx];
             match sh.get_stats_sum(commitments).await {
                 Ok((x, y)) => shares.push(Share { x, y }),
-                Err(_) => continue,
+                Err(e) => {
+                    eprintln!("Warning: shareholder {} stats_sum failed: {e}", sh.x_coord());
+                    continue;
+                }
             }
         }
         shares
@@ -155,7 +158,10 @@ impl Aggregator {
             let sh = &self.shareholders[idx];
             match sh.get_gradients_sum(depth, commitments, node_id).await {
                 Ok((x, y)) => shares.push(Share { x, y }),
-                Err(_) => continue,
+                Err(e) => {
+                    eprintln!("Warning: shareholder {} gradients_sum failed: {e}", sh.x_coord());
+                    continue;
+                }
             }
         }
         shares
@@ -170,7 +176,7 @@ impl Aggregator {
         self.n_clients = commitments.len();
 
         let shares = self.collect_stats_shares(&selected, &commitments).await;
-        let totals = reconstruct(&shares, self.threshold);
+        let totals = reconstruct(&shares, self.threshold)?;
 
         let n_values = totals.len();
         let n_total = n_values / 2;
@@ -246,7 +252,7 @@ impl Aggregator {
                 continue;
             }
 
-            let totals = reconstruct(&shares, self.threshold);
+            let totals = reconstruct(&shares, self.threshold)?;
 
             let n_bins_total = self.n_bins + 2;
             let grad_size = self.n_features * n_bins_total;

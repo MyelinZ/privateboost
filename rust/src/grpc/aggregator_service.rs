@@ -8,6 +8,7 @@ use tonic::{Request, Response, Status};
 use crate::domain::aggregator::{Aggregator, ShareHolderClient};
 use crate::domain::model::*;
 use crate::grpc::remote_shareholder::RemoteShareHolder;
+use crate::grpc::vec_to_ndarray;
 use crate::proto;
 
 // --- Session and config types ---
@@ -262,15 +263,6 @@ fn split_decision_to_proto(sd: &SplitDecision) -> proto::SplitDecision {
         gain: sd.gain,
         left_child_id: sd.left_child_id,
         right_child_id: sd.right_child_id,
-    }
-}
-
-fn vec_to_ndarray(values: &[f64]) -> proto::NdArray {
-    let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
-    proto::NdArray {
-        dtype: proto::DType::Float64 as i32,
-        shape: vec![values.len() as i64],
-        data: bytes,
     }
 }
 
