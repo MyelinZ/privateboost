@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 pub type NodeId = i32;
 pub type Depth = i32;
 
@@ -97,4 +99,65 @@ pub struct SplitDecision {
 pub struct NodeTotals {
     pub gradient_sum: f64,
     pub hessian_sum: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunConfig {
+    pub run_id: String,
+    pub n_bins: usize,
+    pub threshold: usize,
+    pub min_clients: usize,
+    pub learning_rate: f64,
+    pub lambda_reg: f64,
+    pub n_trees: usize,
+    pub max_depth: usize,
+    pub loss: String,
+    pub target_count: usize,
+    pub features: Vec<String>,
+    pub target_column: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StepType {
+    Stats,
+    Gradients,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StepId {
+    pub step_type: StepType,
+    pub round_id: i32,
+    pub depth: i32,
+}
+
+impl StepId {
+    pub fn stats() -> Self {
+        Self {
+            step_type: StepType::Stats,
+            round_id: 0,
+            depth: 0,
+        }
+    }
+
+    pub fn gradients(round_id: i32, depth: i32) -> Self {
+        Self {
+            step_type: StepType::Gradients,
+            round_id,
+            depth,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ConsensusResult {
+    Bins {
+        bins: Vec<BinConfiguration>,
+        initial_prediction: f64,
+    },
+    Splits {
+        splits: HashMap<NodeId, SplitDecision>,
+    },
+    Tree {
+        tree: Tree,
+    },
 }
