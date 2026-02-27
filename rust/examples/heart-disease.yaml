@@ -1,0 +1,30 @@
+training:
+  n_trees: 15
+  max_depth: 3
+  learning_rate: 0.15
+  lambda_reg: 2.0
+  n_bins: 10
+  loss: logistic
+  threshold: 2
+  scale: 1000000
+
+features:
+  - name: age
+  - name: sex
+  - name: cp
+  - name: trestbps
+  - name: chol
+  - name: fbs
+  - name: restecg
+  - name: thalach
+  - name: exang
+  - name: oldpeak
+  - name: slope
+  - name: ca
+  - name: thal
+
+target: target
+
+data:
+  dataset: heart-disease
+  test_split: 0.2
