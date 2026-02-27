@@ -42,13 +42,6 @@ pub struct Aggregator {
     pub min_clients: usize,
     pub learning_rate: f64,
     pub lambda_reg: f64,
-    pub n_clients: usize,
-    pub n_features: usize,
-    pub bin_configs: Vec<BinConfiguration>,
-    pub model: Model,
-    pub next_node_id: NodeId,
-    pub node_totals: HashMap<NodeId, NodeTotals>,
-    pub splits: HashMap<NodeId, SplitDecision>,
 }
 
 impl Aggregator {
@@ -74,13 +67,6 @@ impl Aggregator {
             min_clients,
             learning_rate,
             lambda_reg,
-            n_clients: 0,
-            n_features: 0,
-            bin_configs: Vec::new(),
-            model: Model::new(0.0, learning_rate),
-            next_node_id: 1,
-            node_totals: HashMap::new(),
-            splits: HashMap::new(),
         })
     }
 
@@ -168,33 +154,32 @@ impl Aggregator {
     }
 
     /// Collect stats shares, reconstruct mean/variance per feature,
-    /// and produce `BinConfiguration`s. Also sets
-    /// `model.initial_prediction` to the target mean.
-    pub async fn define_bins(&mut self) -> Result<()> {
+    /// and produce `BinConfiguration`s. Returns (bin_configs, initial_prediction, n_clients, n_features).
+    pub async fn compute_bins(&self) -> Result<(Vec<BinConfiguration>, f64, usize, usize)> {
         let (selected, commitments) =
             self.select_shareholders(CommitmentKind::Stats).await?;
-        self.n_clients = commitments.len();
+        let n_clients = commitments.len();
 
         let shares = self.collect_stats_shares(&selected, &commitments).await;
         let totals = reconstruct(&shares, self.threshold)?;
 
         let n_values = totals.len();
         let n_total = n_values / 2;
-        self.n_features = n_total - 1;
+        let n_features = n_total - 1;
 
         let mut means = vec![0.0; n_total];
         let mut variances = vec![0.0; n_total];
         for idx in 0..n_total {
             let total_x = totals[idx * 2];
             let total_x2 = totals[idx * 2 + 1];
-            means[idx] = total_x / self.n_clients as f64;
-            variances[idx] = (total_x2 / self.n_clients as f64) - (means[idx] * means[idx]);
+            means[idx] = total_x / n_clients as f64;
+            variances[idx] = (total_x2 / n_clients as f64) - (means[idx] * means[idx]);
         }
 
         let stds: Vec<f64> = variances.iter().map(|&v| v.max(0.0).sqrt()).collect();
 
-        self.bin_configs.clear();
-        for idx in 0..self.n_features {
+        let mut bin_configs = Vec::new();
+        for idx in 0..n_features {
             let mean = means[idx];
             let std = stds[idx];
             let range_min = mean - BIN_RANGE_STDS * std;
@@ -207,7 +192,7 @@ impl Aggregator {
             edges.extend_from_slice(&inner_edges);
             edges.push(f64::INFINITY);
 
-            self.bin_configs.push(BinConfiguration {
+            bin_configs.push(BinConfiguration {
                 feature_idx: idx,
                 edges,
                 inner_edges,
@@ -215,24 +200,23 @@ impl Aggregator {
             });
         }
 
-        self.model.initial_prediction = means[n_total - 1];
-        Ok(())
+        let initial_prediction = means[n_total - 1];
+        Ok((bin_configs, initial_prediction, n_clients, n_features))
     }
 
     /// For each active node at `depth`, reconstruct gradient histograms
     /// and find the best split. Returns `true` if any new splits were found.
     pub async fn compute_splits(
-        &mut self,
+        &self,
         depth: Depth,
         min_samples: usize,
+        bin_configs: &[BinConfiguration],
+        n_features: usize,
+        node_totals: &mut HashMap<NodeId, NodeTotals>,
+        splits: &mut HashMap<NodeId, SplitDecision>,
+        next_node_id: &mut NodeId,
     ) -> Result<bool> {
-        if depth == 0 {
-            self.next_node_id = 1;
-            self.node_totals.clear();
-            self.splits.clear();
-        }
-
-        let n_splits_before = self.splits.len();
+        let n_splits_before = splits.len();
 
         let (selected, commitments) = self
             .select_shareholders(CommitmentKind::Gradient(depth))
@@ -255,14 +239,13 @@ impl Aggregator {
             let totals = reconstruct(&shares, self.threshold)?;
 
             let n_bins_total = self.n_bins + 2;
-            let grad_size = self.n_features * n_bins_total;
+            let grad_size = n_features * n_bins_total;
 
             let gradient_flat = &totals[..grad_size];
             let hessian_flat = &totals[grad_size..];
 
-            // Parse per-feature histograms
-            let mut histograms: Vec<(Vec<f64>, Vec<f64>)> = Vec::with_capacity(self.n_features);
-            for f in 0..self.n_features {
+            let mut histograms: Vec<(Vec<f64>, Vec<f64>)> = Vec::with_capacity(n_features);
+            for f in 0..n_features {
                 let start = f * n_bins_total;
                 let end = start + n_bins_total;
                 histograms.push((
@@ -271,11 +254,10 @@ impl Aggregator {
                 ));
             }
 
-            // Compute node totals from first histogram
             let total_g: f64 = histograms[0].0.iter().sum();
             let total_h: f64 = histograms[0].1.iter().sum();
 
-            self.node_totals.insert(
+            node_totals.insert(
                 node_id,
                 NodeTotals {
                     gradient_sum: total_g,
@@ -290,16 +272,15 @@ impl Aggregator {
 
             let base_score = (total_g * total_g) / (total_h + self.lambda_reg);
 
-            let mut best_gain = 0.0_f64; // min_gain = 0.0
+            let mut best_gain = 0.0_f64;
             let mut best_split: Option<SplitDecision> = None;
 
             for (feature_idx, (grad_hist, hess_hist)) in histograms.iter().enumerate() {
-                if feature_idx >= self.bin_configs.len() {
+                if feature_idx >= bin_configs.len() {
                     continue;
                 }
-                let config = &self.bin_configs[feature_idx];
+                let config = &bin_configs[feature_idx];
 
-                // Cumulative sums
                 let mut g_cumsum = vec![0.0; grad_hist.len()];
                 let mut h_cumsum = vec![0.0; hess_hist.len()];
                 g_cumsum[0] = grad_hist[0];
@@ -309,7 +290,6 @@ impl Aggregator {
                     h_cumsum[i] = h_cumsum[i - 1] + hess_hist[i];
                 }
 
-                // Scan split points (between bins)
                 for i in 0..(grad_hist.len() - 1) {
                     let g_left = g_cumsum[i];
                     let h_left = h_cumsum[i];
@@ -332,8 +312,8 @@ impl Aggregator {
                             feature_idx,
                             threshold,
                             gain,
-                            left_child_id: self.next_node_id,
-                            right_child_id: self.next_node_id + 1,
+                            left_child_id: *next_node_id,
+                            right_child_id: *next_node_id + 1,
                             g_left,
                             h_left,
                             g_right,
@@ -344,52 +324,64 @@ impl Aggregator {
             }
 
             if let Some(split) = best_split {
-                self.node_totals.insert(
+                node_totals.insert(
                     split.left_child_id,
                     NodeTotals {
                         gradient_sum: split.g_left,
                         hessian_sum: split.h_left,
                     },
                 );
-                self.node_totals.insert(
+                node_totals.insert(
                     split.right_child_id,
                     NodeTotals {
                         gradient_sum: split.g_right,
                         hessian_sum: split.h_right,
                     },
                 );
-                self.splits.insert(node_id, split);
-                self.next_node_id += 2;
+                splits.insert(node_id, split);
+                *next_node_id += 2;
             }
         }
 
-        Ok(self.splits.len() > n_splits_before)
+        Ok(splits.len() > n_splits_before)
     }
 
-    /// Build a tree from the current splits and add it to the model.
-    pub fn finish_round(&mut self) {
-        let tree = Tree {
-            root: self.build_node(0),
-        };
-        self.model.add_tree(tree);
+    /// Build a tree from splits and node_totals (pure function, no mutation).
+    pub fn build_tree(
+        &self,
+        splits: &HashMap<NodeId, SplitDecision>,
+        node_totals: &HashMap<NodeId, NodeTotals>,
+    ) -> Tree {
+        Tree {
+            root: self.build_node(0, splits, node_totals),
+        }
     }
 
-    fn build_node(&self, node_id: NodeId) -> TreeNode {
-        if let Some(split) = self.splits.get(&node_id) {
+    fn build_node(
+        &self,
+        node_id: NodeId,
+        splits: &HashMap<NodeId, SplitDecision>,
+        node_totals: &HashMap<NodeId, NodeTotals>,
+    ) -> TreeNode {
+        if let Some(split) = splits.get(&node_id) {
             TreeNode::Split(SplitNode {
                 feature_idx: split.feature_idx,
                 threshold: split.threshold,
                 gain: split.gain,
-                left: Box::new(self.build_node(split.left_child_id)),
-                right: Box::new(self.build_node(split.right_child_id)),
+                left: Box::new(self.build_node(split.left_child_id, splits, node_totals)),
+                right: Box::new(self.build_node(split.right_child_id, splits, node_totals)),
             })
         } else {
-            self.compute_leaf(node_id)
+            self.compute_leaf(node_id, node_totals)
         }
     }
 
-    fn compute_leaf(&self, node_id: NodeId) -> TreeNode {
-        let (total_g, total_h) = match self.node_totals.get(&node_id) {
+    fn compute_leaf(
+        &self,
+        node_id: NodeId,
+        node_totals: &HashMap<NodeId, NodeTotals>,
+    ) -> TreeNode {
+        let (total_g, total_h) = match node_totals.get(&node_id) {
             Some(t) => (t.gradient_sum, t.hessian_sum),
             None => (0.0, 0.0),
         };
