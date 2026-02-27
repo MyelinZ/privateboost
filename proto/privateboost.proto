@@ -33,19 +33,22 @@ service ShareholderService {
   rpc GetStatsSum(GetStatsSumRequest) returns (GetStatsSumResponse);
   rpc GetGradientsSum(GetGradientsSumRequest) returns (GetGradientsSumResponse);
 
-  rpc CancelSession(CancelSessionRequest) returns (CancelSessionResponse);
-  rpc Reset(ResetRequest) returns (ResetResponse);
+  rpc SubmitResult(SubmitResultRequest) returns (SubmitResultResponse);
+  rpc GetConsensusBins(GetConsensusBinsRequest) returns (GetConsensusBinsResponse);
+  rpc GetConsensusSplits(GetConsensusSplitsRequest) returns (GetConsensusSplitsResponse);
+  rpc GetConsensusModel(GetConsensusModelRequest) returns (GetConsensusModelResponse);
+  rpc GetRunState(GetRunStateRequest) returns (GetRunStateResponse);
 }
 
 message SubmitStatsRequest {
-  string session_id = 1;
+  string run_id = 1;
   bytes commitment = 2;
   Share share = 3;
 }
 message SubmitStatsResponse {}
 
 message SubmitGradientsRequest {
-  string session_id = 1;
+  string run_id = 1;
   int32 round_id = 2;
   int32 depth = 3;
   bytes commitment = 4;
@@ -55,14 +58,14 @@ message SubmitGradientsRequest {
 message SubmitGradientsResponse {}
 
 message GetStatsCommitmentsRequest {
-  string session_id = 1;
+  string run_id = 1;
 }
 message GetStatsCommitmentsResponse {
   repeated bytes commitments = 1;
 }
 
 message GetGradientCommitmentsRequest {
-  string session_id = 1;
+  string run_id = 1;
   int32 round_id = 2;
   int32 depth = 3;
 }
@@ -71,7 +74,7 @@ message GetGradientCommitmentsResponse {
 }
 
 message GetGradientNodeIdsRequest {
-  string session_id = 1;
+  string run_id = 1;
   int32 round_id = 2;
   int32 depth = 3;
 }
@@ -80,7 +83,7 @@ message GetGradientNodeIdsResponse {
 }
 
 message GetStatsSumRequest {
-  string session_id = 1;
+  string run_id = 1;
   repeated bytes commitments = 2;
 }
 message GetStatsSumResponse {
@@ -88,7 +91,7 @@ message GetStatsSumResponse {
 }
 
 message GetGradientsSumRequest {
-  string session_id = 1;
+  string run_id = 1;
   int32 round_id = 2;
   int32 depth = 3;
   repeated bytes commitments = 4;
@@ -98,48 +101,131 @@ message GetGradientsSumResponse {
   NdArray sum = 1;
 }
 
-message CancelSessionRequest {
-  string session_id = 1;
+message SubmitResultRequest {
+  string run_id = 1;
+  StepId step = 2;
+  int32 aggregator_id = 3;
+  bytes result_hash = 4;
+  oneof result {
+    BinsResult bins_result = 5;
+    SplitsResult splits_result = 6;
+    TreeResult tree_result = 7;
+  }
 }
-message CancelSessionResponse {}
-
-message ResetRequest {
-  string session_id = 1;
+message SubmitResultResponse {
+  bool consensus_reached = 1;
 }
-message ResetResponse {}
 
-// -- AggregatorService --
-
-service AggregatorService {
-  rpc JoinSession(JoinSessionRequest) returns (JoinSessionResponse);
-  rpc CancelSession(CancelSessionRequest) returns (CancelSessionResponse);
-  rpc GetRoundState(GetRoundStateRequest) returns (GetRoundStateResponse);
-  rpc GetTrainingState(GetTrainingStateRequest) returns (GetTrainingStateResponse);
-  rpc GetModel(GetModelRequest) returns (GetModelResponse);
+message BinsResult {
+  repeated BinConfiguration bins = 1;
+  double initial_prediction = 2;
 }
+message SplitsResult {
+  map<int32, SplitDecision> splits = 1;
+}
+message TreeResult {
+  Tree tree = 1;
+}
+
+message GetConsensusBinsRequest {
+  string run_id = 1;
+}
+message GetConsensusBinsResponse {
+  repeated BinConfiguration bins = 1;
+  double initial_prediction = 2;
+  bool ready = 3;
+}
+
+message GetConsensusSplitsRequest {
+  string run_id = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+}
+message GetConsensusSplitsResponse {
+  map<int32, SplitDecision> splits = 1;
+  bool ready = 2;
+}
+
+message GetConsensusModelRequest {
+  string run_id = 1;
+}
+message GetConsensusModelResponse {
+  Model model = 1;
+}
+
+message GetRunStateRequest {
+  string run_id = 1;
+}
+message GetRunStateResponse {
+  Phase phase = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
+  int32 expected_aggregators = 4;
+  int32 received_results = 5;
+}
+
+// -- CoordinatorService --
+
+service CoordinatorService {
+  rpc CreateRun(CreateRunRequest) returns (CreateRunResponse);
+  rpc CancelRun(CancelRunRequest) returns (CancelRunResponse);
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  rpc GetRunConfig(GetRunConfigRequest) returns (GetRunConfigResponse);
+}
+
+message CreateRunRequest {
+  TrainingConfig config = 1;
+}
+message CreateRunResponse {
+  string run_id = 1;
+}
+message CancelRunRequest {
+  string run_id = 1;
+}
+message CancelRunResponse {}
+message ListRunsRequest {}
+message ListRunsResponse {
+  repeated RunInfo runs = 1;
+}
+message RunInfo {
+  string run_id = 1;
+  RunStatus status = 2;
+}
+enum RunStatus {
+  RUN_ACTIVE = 0;
+  RUN_CANCELLED = 1;
+  RUN_COMPLETE = 2;
+}
+message GetRunConfigRequest {
+  string run_id = 1;
+}
+message GetRunConfigResponse {
+  TrainingConfig config = 1;
+}
+
+// -- Phase and step types --
 
 enum Phase {
   WAITING_FOR_CLIENTS = 0;
-  COLLECTING_GRADIENTS = 1;
-  TRAINING_COMPLETE = 2;
+  COLLECTING_STATS = 1;
+  FROZEN_STATS = 2;
+  COLLECTING_GRADIENTS = 3;
+  FROZEN_GRADIENTS = 4;
+  TRAINING_COMPLETE = 5;
 }
 
-message JoinSessionRequest {
-  string session_id = 1;
+message StepId {
+  StepType step_type = 1;
+  int32 round_id = 2;
+  int32 depth = 3;
 }
 
-message JoinSessionResponse {
-  string session_id = 1;
-  repeated ShareholderInfo shareholders = 2;
-  int32 threshold = 3;
-  TrainingConfig config = 4;
+enum StepType {
+  STATS = 0;
+  GRADIENTS = 1;
 }
 
-message ShareholderInfo {
-  string id = 1;
-  string address = 2;
-  int32 x_coord = 3;
-}
+// -- Training config --
 
 message TrainingConfig {
   repeated FeatureSpec features = 1;
@@ -160,33 +246,6 @@ message TrainingConfig {
 message FeatureSpec {
   int32 index = 1;
   string name = 2;
-}
-
-message GetRoundStateRequest {
-  string session_id = 1;
-}
-message GetRoundStateResponse {
-  Phase phase = 1;
-  int32 round_id = 2;
-  int32 depth = 3;
-}
-
-message GetTrainingStateRequest {
-  string session_id = 1;
-}
-message GetTrainingStateResponse {
-  Model model = 1;
-  map<int32, SplitDecision> current_splits = 2;
-  repeated BinConfiguration bins = 3;
-  int32 round_id = 4;
-  int32 depth = 5;
-}
-
-message GetModelRequest {
-  string session_id = 1;
-}
-message GetModelResponse {
-  Model model = 1;
 }
 
 // -- Shared model messages --
