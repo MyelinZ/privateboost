@@ -59,8 +59,15 @@ impl Aggregator {
         min_clients: usize,
         learning_rate: f64,
         lambda_reg: f64,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        if shareholders.len() < threshold {
+            bail!(
+                "Need at least {} shareholders, got {}",
+                threshold,
+                shareholders.len()
+            );
+        }
+        Ok(Self {
             shareholders,
             n_bins,
             threshold,
@@ -74,7 +81,7 @@ impl Aggregator {
             next_node_id: 1,
             node_totals: HashMap::new(),
             splits: HashMap::new(),
-        }
+        })
     }
 
     /// Select `threshold` shareholders whose commitment sets have the
