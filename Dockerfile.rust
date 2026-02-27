@@ -6,5 +6,6 @@ COPY rust/ rust/
 RUN cargo build --release --manifest-path rust/Cargo.toml
 
 FROM debian:bookworm-slim
+COPY --from=builder /app/rust/target/release/coordinator /usr/local/bin/
 COPY --from=builder /app/rust/target/release/shareholder /usr/local/bin/
 COPY --from=builder /app/rust/target/release/aggregator /usr/local/bin/
