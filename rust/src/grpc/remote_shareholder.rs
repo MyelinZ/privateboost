@@ -21,7 +21,12 @@ pub struct RemoteShareHolder {
 
 impl RemoteShareHolder {
     pub async fn connect(address: &str, x_coord: i32, session_id: String) -> Result<Self> {
-        let client = ShareholderServiceClient::connect(address.to_string()).await?;
+        let url = if address.starts_with("http://") || address.starts_with("https://") {
+            address.to_string()
+        } else {
+            format!("http://{address}")
+        };
+        let client = ShareholderServiceClient::connect(url).await?;
         Ok(Self {
             x: x_coord,
             round_id: AtomicI32::new(0),
