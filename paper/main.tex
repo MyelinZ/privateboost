@@ -1,46 +1,40 @@
-\documentclass[twocolumn]{article}
+\documentclass[journal,10pt]{IEEEtran}
 
-\usepackage{arxiv}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{booktabs}
-\usepackage[numbers]{natbib}
-\usepackage{authblk}
-
-\renewcommand{\headeright}{}
-\renewcommand{\undertitle}{}
+\usepackage{cite}
 
 \title{PrivateBoost: Privacy-Preserving Federated Gradient Boosting for Cross-Device Medical Data}
 
-\author[1,2]{Bernhard Specht\thanks{Corresponding author: \texttt{bernhard.specht@myelinz.com}}}
-\author[1]{Samaher Garbaya}
-\author[3]{Orhan Ermis}
-\author[4]{Reinhard Schneider}
-\author[5]{Ricardo Chavarriaga}
-\author[3]{Djamel Khadraoui}
-\author[1,6]{Zied Tayeb}
+\author{Bernhard~Specht,~\IEEEmembership{}
+        Samaher~Garbaya,
+        Orhan~Ermis,
+        Reinhard~Schneider,
+        Ricardo~Chavarriaga,
+        Djamel~Khadraoui,
+        and~Zied~Tayeb%
+\thanks{B.~Specht is with MyelinZ and the University of Luxembourg, Esch-sur-Alzette, Luxembourg (e-mail: bernhard.specht@myelinz.com).}%
+\thanks{S.~Garbaya and Z.~Tayeb are with MyelinZ. Z.~Tayeb is also with the University of Lincoln, Lincoln, United Kingdom.}%
+\thanks{O.~Ermis and D.~Khadraoui are with the Luxembourg Institute of Science and Technology (LIST), Esch-sur-Alzette, Luxembourg.}%
+\thanks{R.~Schneider is with the Luxembourg Centre for Systems Biomedicine (LCSB), Esch-sur-Alzette, Luxembourg.}%
+\thanks{R.~Chavarriaga is with ZHAW Zurich University of Applied Sciences, Winterthur, Switzerland.}}
 
-\affil[1]{MyelinZ, Manchester, UK / San Francisco, USA / Leuven, Belgium /Luxembourg}
-\affil[2]{University of Luxembourg, Esch-sur-Alzette, Luxembourg}
-\affil[3]{Luxembourg Institute of Science and Technology (LIST), Esch-sur-Alzette, Luxembourg}
-\affil[4]{Luxembourg Centre for Systems Biomedicine (LCSB), Esch-sur-Alzette, Luxembourg}
-\affil[5]{ZHAW Zurich University of Applied Sciences, Winterthur, Switzerland}
-\affil[6]{University of Lincoln, Lincoln, United Kingdom}
-
-\date{}
+\markboth{IEEE Transactions on Information Forensics and Security}%
+{Specht \MakeLowercase{\textit{et al.}}: PrivateBoost}
 
 \begin{document}
 
-\twocolumn[
-  \maketitle
-  \begin{@twocolumnfalse}
-  \begin{abstract}
+\maketitle
+
+\begin{abstract}
 Cross-device medical federated learning where individual patients participate directly rather than institutions poses a unique challenge: each client holds only a few samples, often just one (e.g., a single diagnostic record), leaving insufficient local data for gradient computation. Existing approaches, such as Secure Aggregation, require client-to-client coordination impractical for intermittently available mobile devices, while homomorphic encryption-based alternatives introduce sophisticated key management and coordination requirements ill-suited to dynamic cross-device deployments. We present \textit{privateboost}, a federated XGBoost system that addresses this setting through m-of-n Shamir secret sharing with commitment-based anonymous aggregation. Clients distribute shares to a fixed set of shareholders requiring no client-to-client communication and the aggregator reconstructs only aggregate gradient sums via Lagrange interpolation, never observing individual values or client identities. We evaluate on UCI medical datasets, demonstrating 98\% split gain retention relative to centralized XGBoost and accuracy resilient to up to 80\% client dropout.
-  \end{abstract}
-  \vspace{1em}
-  \end{@twocolumnfalse}
-]
+\end{abstract}
+
+\begin{IEEEkeywords}
+Federated learning, gradient boosting, secret sharing, privacy-preserving machine learning, cross-device learning
+\end{IEEEkeywords}
 
 \section{Introduction}
 
@@ -122,7 +116,7 @@ where $G_L = \sum_{i \in L} g_i$, $H_L = \sum_{i \in L} h_i$, and $\lambda$ is a
 
 \subsection{System Model}
 
-We consider $c$ clients, each holding a single labeled sample $(x_i, y_i)$. A set of $n$ \textit{shareholders} (e.g., $n = 3$) act as intermediate aggregation points. A single \textit{aggregator} coordinates the training process. Figure~\ref{fig:architecture} illustrates the overall system architecture.
+We consider $c$ clients, each holding a single labeled sample $(x_i, y_i)$. A set of $n$ \textit{shareholders} (e.g., $n = 3$) act as intermediate aggregation points. A single \textit{aggregator} coordinates the training process. Fig.~\ref{fig:architecture} illustrates the overall system architecture.
 
 \begin{figure*}[t]
   \centering
@@ -219,7 +213,7 @@ Following the protocol design, each client holds exactly one sample: we instanti
   \label{fig:learning_curves}
 \end{figure*}
 
-Across all three datasets, \textit{privateboost} achieves competitive test accuracy (Figure~\ref{fig:learning_curves}). On Heart Disease, \textit{privateboost} achieves 88.3\% compared to 83.3\% for XGBoost with matched hyperparameters and 76.7\% for XGBoost with defaults. On Breast Cancer, all three methods achieve 95.6\% accuracy. On Pima Diabetes, \textit{privateboost} achieves 71.4\% compared to 73.4\% for both XGBoost configurations.
+Across all three datasets, \textit{privateboost} achieves competitive test accuracy (Fig.~\ref{fig:learning_curves}). On Heart Disease, \textit{privateboost} achieves 88.3\% compared to 83.3\% for XGBoost with matched hyperparameters and 76.7\% for XGBoost with defaults. On Breast Cancer, all three methods achieve 95.6\% accuracy. On Pima Diabetes, \textit{privateboost} achieves 71.4\% compared to 73.4\% for both XGBoost configurations.
 
 The Heart Disease result is notable: \textit{privateboost} outperforms both XGBoost configurations, which we attribute to a regularization effect from histogram binning that reduces overfitting on smaller datasets.
 
@@ -238,7 +232,7 @@ where $G_f^{\text{exact}}$ is the optimal split gain obtained by exhaustive sear
   \label{fig:gain_retention}
 \end{figure}
 
-On Heart Disease, mean retention is $\bar{R} = 98.1\%$ across 13 features, with 10 features achieving $R_f = 100\%$ (Figure~\ref{fig:gain_retention}). Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in a few bins. This explains the 90--93\% retention observed on features like \texttt{oldpeak}.
+On Heart Disease, mean retention is $\bar{R} = 98.1\%$ across 13 features, with 10 features achieving $R_f = 100\%$ (Fig.~\ref{fig:gain_retention}). Histogram bins are constructed using aggregated statistics from the first protocol round, requiring no additional privacy cost. Features with skewed distributions may have suboptimal bin placement, with most data concentrated in a few bins. This explains the 90--93\% retention observed on features like \texttt{oldpeak}.
 
 In cross-device settings, clients are intermittently available: mobile devices go offline, patients miss check-ins, or network connectivity fails. The protocol must tolerate such dropout without requiring all clients to participate in every round.
 
@@ -253,7 +247,7 @@ The protocol naturally handles client dropout: the aggregator reconstructs from 
 
 \textbf{Impact on reconstruction.} Client dropout does not affect the secret sharing reconstruction itself. Shamir reconstruction requires $m$ out of $n$ \textit{shareholder} responses, which is independent of client participation. Dropout reduces the number of shares each shareholder receives, but shareholders can still sum any subset of received shares and the aggregator can reconstruct the aggregate of participating clients. The minimum-client threshold enforced by shareholders (Section~\ref{sec:threat-model}) provides a lower bound: if fewer than the minimum number of clients participate, shareholders refuse to release sums, preventing reconstruction from insufficiently anonymized aggregates.
 
-\textbf{Impact on model quality.} As shown in Figure~\ref{fig:dropout_resilience}, accuracy remains stable up to 80\% dropout across all datasets. At moderate dropout rates (20--50\%), the model sees different subsets of clients per round, which can act as a form of bagging and may improve generalization. Beyond 80\% dropout, accuracy degrades more sharply as gradient sums become noisy estimates computed from very few clients. The degradation is dataset-dependent: smaller datasets (Heart Disease, 297 samples) are more sensitive to extreme dropout than larger ones (Pima Diabetes, 768 samples).
+\textbf{Impact on model quality.} As shown in Fig.~\ref{fig:dropout_resilience}, accuracy remains stable up to 80\% dropout across all datasets. At moderate dropout rates (20--50\%), the model sees different subsets of clients per round, which can act as a form of bagging and may improve generalization. Beyond 80\% dropout, accuracy degrades more sharply as gradient sums become noisy estimates computed from very few clients. The degradation is dataset-dependent: smaller datasets (Heart Disease, 297 samples) are more sensitive to extreme dropout than larger ones (Pima Diabetes, 768 samples).
 
 \section{Future Work}
 
@@ -288,13 +282,13 @@ We presented \textit{privateboost}, a privacy-preserving federated XGBoost syste
 
 Evaluation on medical datasets demonstrates 98\% split gain retention with accuracy comparable to centralized XGBoost. The system enables true cross-device medical federated learning where patients can participate directly without institutional intermediaries.
 
-\section*{Acknowledgement}
+\section*{Acknowledgment}
 The authors would like to thank the Ministry of the Economy in Luxembourg and its digital health directorate for co-supporting this research. Similarly, we would like to thank the Luxembourg National Research Fund (FNR) for partially funding this research.
 
 \section*{Funding}
 This work was supported in part by a PhD grant from the Luxembourg National Research Fund (FNR) under the project reference 17223919/MMS/Industrial Fellowship, and in part by the R-MMS clinical trial.
 
-\bibliographystyle{unsrtnat}
+\bibliographystyle{IEEEtran}
 \bibliography{references}
 
 \end{document}
