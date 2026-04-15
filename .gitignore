@@ -1,0 +1,28 @@
+# IDE
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+build/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Rust
+rust/privateboost/target/
+
+# Internal docs
+docs/
+
+# Paper (not public)
+paper/
+
+# Firebase
+firebase-debug.log
+
+# Data (downloaded via scripts/prepare_datasets.py)
+/data/
