@@ -1,0 +1,23 @@
+{
+  "title": "PrivateBoost: privacy-preserving federated gradient boosting for single-record patient devices",
+  "upload_type": "software",
+  "license": "Apache-2.0",
+  "version": "v1.0.1",
+  "description": "Deployable implementation of the PrivateBoost protocol: histogram-based federated gradient boosting in which every client holds a single labelled record, splits its gradient and Hessian statistics into Shamir shares over a Mersenne prime field, and distributes them to independent shareholders that only ever release population-level sums. Includes the protocol crate, the shareholder and aggregator server, the client library and CLI, the Flutter mobile application, the deployment configurations, and the analysis scripts that reproduce the reported experiments and figures.",
+  "keywords": [
+    "federated learning",
+    "gradient boosting",
+    "secret sharing",
+    "privacy-preserving machine learning",
+    "cross-device learning"
+  ],
+  "creators": [
+    {"name": "Specht, Bernhard", "affiliation": "MyelinZ, Manchester, United Kingdom"},
+    {"name": "Ermis, Orhan", "affiliation": "Luxembourg Institute of Science and Technology, Esch-sur-Alzette, Luxembourg"},
+    {"name": "Garbaya, Samaher", "affiliation": "MyelinZ, Manchester, United Kingdom"},
+    {"name": "Schneider, Reinhard", "affiliation": "Luxembourg Centre for Systems Biomedicine, University of Luxembourg, Esch-sur-Alzette, Luxembourg"},
+    {"name": "Chavarriaga, Ricardo", "affiliation": "ZHAW Zurich University of Applied Sciences, Winterthur, Switzerland"},
+    {"name": "Khadraoui, Djamel", "affiliation": "Luxembourg Institute of Science and Technology, Esch-sur-Alzette, Luxembourg"},
+    {"name": "Tayeb, Zied", "affiliation": "MyelinZ, Manchester, United Kingdom"}
+  ]
+}
