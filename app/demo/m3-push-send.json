@@ -1,0 +1,4 @@
+# FCM HTTP v1 send via gcloud ADC → HTTP 200 (accepted for delivery to backgrounded device):
+{
+  "name": "projects/pboost-test-12345/messages/0:1784303500858008%c0d87317f9fd7ecd"
+}

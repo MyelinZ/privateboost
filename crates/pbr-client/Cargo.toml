@@ -1,0 +1,38 @@
+[package]
+name = "pbr-client"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+pbr-core.workspace = true
+pbr-proto = { path = "../pbr-proto" }
+tonic.workspace = true
+futures = "0.3"
+tokio = { workspace = true, features = ["net"] }
+tower = { version = "0.5", features = ["util"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http = "1"
+jsonwebtoken = { workspace = true, optional = true }
+serde.workspace = true
+anyhow.workspace = true
+rustls.workspace = true
+clap = { workspace = true, optional = true }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, optional = true }
+
+[features]
+# The dev JWT minter (`jwt::mint`) for the CLI, tests, and self-hosted
+# issuers. Off by default so neither it nor its `jsonwebtoken` dependency is
+# compiled into the mobile `.so` built from `app/rust`.
+dev-mint = ["dep:jsonwebtoken"]
+# The `pbr-client` CLI binary plus the deps only it uses.
+cli = ["dep:clap", "dep:tracing-subscriber", "dev-mint"]
+
+[[bin]]
+name = "pbr-client"
+path = "src/bin/pbr-client.rs"
+required-features = ["cli"]
+
+[dev-dependencies]
+pbr-server = { path = "../pbr-server" }
+tokio-stream.workspace = true

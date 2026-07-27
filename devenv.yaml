@@ -1,0 +1,10 @@
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  # Backs languages.rust.channel in devenv.nix: devenv's rust module fetches
+  # the toolchain (incl. the llvm-tools component) from this overlay.
+  rust-overlay:
+    url: github:oxalica/rust-overlay
+    inputs:
+      nixpkgs:
+        follows: nixpkgs

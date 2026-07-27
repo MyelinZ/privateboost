@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+pbr-core = { path = "crates/pbr-core" }
+tonic = { version = "0.14", features = ["tls-ring"] }
+tonic-prost = "0.14"
+prost = "0.14"
+prost-types = "0.14"
+tonic-prost-build = "0.14"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+clap = { version = "4", features = ["derive"] }
+# jsonwebtoken 10 has no default crypto backend (default features are just
+# `use_pem`) and selects one from its OWN `aws_lc_rs`/`rust_crypto` crate
+# features — with neither enabled, every mint/verify panics. This is
+# jsonwebtoken's own provider, unrelated to the rustls process provider that
+# `ensure_crypto_provider` installs. Pin `aws_lc_rs` (already in the tree via
+# rustls, so no new crate) so JWT ops are backend-deterministic.
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+uuid = { version = "1", features = ["v4"] }
+arc-swap = "1"
+serde_json = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+rustls = { version = "0.23", features = ["ring"] }
+# default tls-roots pulls native-tls/OpenSSL and fails at runtime (libssl); stay rustls-only.
+firestore = { version = "0.49", default-features = false, features = ["tls-webpki-roots"] }

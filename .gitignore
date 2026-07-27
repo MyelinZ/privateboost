@@ -1,28 +1,38 @@
-# IDE
-.idea/
-
-# Python
+/target
+/app/rust/target
+**/*.pem.local
+.devenv*
+.direnv
+.superpowers/
+/app/android/app/src/main/jniLibs/
+crates/pbr-server/tests/fixtures/tls/ca.key
+.env
 __pycache__/
-*.pyc
-*.egg-info/
-.venv/
-dist/
-build/
-.ruff_cache/
-.mypy_cache/
-.pytest_cache/
+/.venv
+/manuscript/build/
+# The TikZ figures are built in place by latexmk. The figure directory sits under
+# manuscript/ here and at the top level in the published artifact, so both paths
+# are listed; each matches only in the tree that has it.
+/manuscript/figures/*.aux
+/manuscript/figures/*.fdb_latexmk
+/manuscript/figures/*.fls
+/manuscript/figures/*.log
+/figures/*.aux
+/figures/*.fdb_latexmk
+/figures/*.fls
+/figures/*.log
 
-# Rust
-rust/privateboost/target/
+# export_source_data.py's workbooks. They are committed under
+# manuscript/supplementary/ here; in the published artifact, which carries no
+# manuscript/, they are regenerable output that ships with nothing to compare
+# against, so only the top-level path is ignored.
+/supplementary/
 
-# Internal docs
-docs/
+/deploy/local/state/
+/deploy/emulator/state/
 
-# Paper (not public)
-paper/
-
-# Firebase
-firebase-debug.log
-
-# Data (downloaded via scripts/prepare_datasets.py)
-/data/
+# Claude worktrees and session scratch
+.claude/worktrees/
+/manuscript/build-diff/
+/manuscript/build-rebuttal/
+/manuscript/overleaf.zip

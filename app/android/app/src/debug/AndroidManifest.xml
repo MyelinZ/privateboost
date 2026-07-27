@@ -1,0 +1,12 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The INTERNET permission is required for development. Specifically,
+         the Flutter tool needs it to communicate with the running application
+         to allow setting breakpoints, to provide hot reload, etc.
+    -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Cleartext lives only in the debug manifest so the loopback emulator
+         demo (http aggregator over adb reverse) works while release builds stay
+         TLS-only. The main manifest omits the attribute, so the merger adds it
+         here with no conflict. -->
+    <application android:usesCleartextTraffic="true"/>
+</manifest>

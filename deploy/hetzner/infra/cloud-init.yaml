@@ -1,0 +1,8 @@
+#cloud-config
+# Install Docker Engine + the compose v2 plugin from Ubuntu's repos so the VM
+# can run the compose cluster. Declarative (no curl | sh). The docker.io package
+# enables and starts the daemon on boot.
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2

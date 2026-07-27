@@ -1,0 +1,41 @@
+# Aggregator — local docker-compose smoke (docker-compose.smoke.yml). Dev JWT
+# issuer verified against the committed test public key mounted at
+# /secrets/issuer.pub.pem; a CLI client mints its own token from the matching
+# private key. TLS uses a cert whose IP SAN is 127.0.0.1 (gen-certs.sh 127.0.0.1),
+# and there is no [fcm] section.
+#
+# The aggregator boots hosting no session. Start one over the admin plane
+# once the stack is up — `pbr-admin create-session` — see README.md's "Local
+# smoke". `admin_token` below is a committed DEV token: this cluster is
+# loopback-only with committed dev keys already (see [auth]), so it is not a
+# new secret class.
+listen = "127.0.0.1:42800"
+internal_shareholder_endpoints = [
+    "http://127.0.0.1:42811",
+    "http://127.0.0.1:42812",
+    "http://127.0.0.1:42813",
+]
+client_shareholder_endpoints = [
+    "https://127.0.0.1:42801",
+    "https://127.0.0.1:42802",
+    "https://127.0.0.1:42803",
+]
+threshold = 2
+admin_token = "dev-admin-token"
+# Ephemeral session store: the smoke stack is throwaway and its compose file
+# mounts no writable volume, so there is nothing to persist across restarts.
+state_path = ":memory:"
+
+# Datasets this cluster accepts CreateSession requests for. heart_disease is
+# the dataset the Local smoke walkthrough's CLI client trains (13 features).
+[datasets]
+heart_disease = 13
+
+[auth]
+issuer = "https://test-issuer.local"
+audience = "pbr"
+static_keys = [{ kid = "test-1", public_key_pem_path = "/secrets/issuer.pub.pem" }]
+
+[tls]
+cert_path = "/secrets/server.crt"
+key_path = "/secrets/server.key"

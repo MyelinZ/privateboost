@@ -1,0 +1,19 @@
+[package]
+name = "pbr-core"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+sha2 = "0.10"
+rand = "0.9"
+csv = "1"
+thiserror = "2"
+itertools = "0.14"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Measures the serialized length of a gradient share in test_integration.rs,
+# which asserts that length is independent of which bin the client occupies.
+bincode = "1"

@@ -1,0 +1,55 @@
+# Local smoke of the deploy image: the same four services as docker-compose.yml
+# but wired for a single CLI client on this machine. Dev JWT issuer (no
+# Firebase, no FCM), TLS with a 127.0.0.1 cert, min_clients = 1. See README.md
+# "Local smoke".
+#
+# SMOKE_CERT_DIR must point at a directory holding server.crt/server.key/ca.crt
+# generated with `gen-certs.sh 127.0.0.1 --out $SMOKE_CERT_DIR`.
+services:
+  aggregator:
+    image: pbr-server:deploy
+    command: ["--role", "aggregator", "--config", "/config.toml"]
+    network_mode: host
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/smoke/aggregator.toml:/config.toml:ro
+      - ${SMOKE_CERT_DIR:?set SMOKE_CERT_DIR to the gen-certs.sh output dir}/server.crt:/secrets/server.crt:ro
+      - ${SMOKE_CERT_DIR}/server.key:/secrets/server.key:ro
+      - ../../crates/pbr-server/tests/fixtures/test_key.pub.pem:/secrets/issuer.pub.pem:ro
+
+  shareholder-1:
+    image: pbr-server:deploy
+    command: ["--role", "shareholder", "--config", "/config.toml"]
+    network_mode: host
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/smoke/shareholder-1.toml:/config.toml:ro
+      - ${SMOKE_CERT_DIR:?set SMOKE_CERT_DIR to the gen-certs.sh output dir}/server.crt:/secrets/server.crt:ro
+      - ${SMOKE_CERT_DIR}/server.key:/secrets/server.key:ro
+      - ../../crates/pbr-server/tests/fixtures/test_key.pub.pem:/secrets/issuer.pub.pem:ro
+
+  shareholder-2:
+    image: pbr-server:deploy
+    command: ["--role", "shareholder", "--config", "/config.toml"]
+    network_mode: host
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/smoke/shareholder-2.toml:/config.toml:ro
+      - ${SMOKE_CERT_DIR:?set SMOKE_CERT_DIR to the gen-certs.sh output dir}/server.crt:/secrets/server.crt:ro
+      - ${SMOKE_CERT_DIR}/server.key:/secrets/server.key:ro
+      - ../../crates/pbr-server/tests/fixtures/test_key.pub.pem:/secrets/issuer.pub.pem:ro
+
+  shareholder-3:
+    image: pbr-server:deploy
+    command: ["--role", "shareholder", "--config", "/config.toml"]
+    network_mode: host
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/smoke/shareholder-3.toml:/config.toml:ro
+      - ${SMOKE_CERT_DIR:?set SMOKE_CERT_DIR to the gen-certs.sh output dir}/server.crt:/secrets/server.crt:ro
+      - ${SMOKE_CERT_DIR}/server.key:/secrets/server.key:ro
+      - ../../crates/pbr-server/tests/fixtures/test_key.pub.pem:/secrets/issuer.pub.pem:ro

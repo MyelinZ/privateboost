@@ -1,0 +1,40 @@
+[package]
+name = "pbr-server"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+pbr-core.workspace = true
+pbr-proto = { path = "../pbr-proto" }
+prost-types.workspace = true
+tonic.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+jsonwebtoken.workspace = true
+serde.workspace = true
+toml.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+arc-swap.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+firestore.workspace = true
+# Direct dep: `firestore` doesn't re-export gcloud_sdk (fcm.rs's token generator needs
+# it); google-firestore-v1 is for the tests' ValueType import; TLS via tls-webpki-roots.
+gcloud-sdk = { version = "0.30", default-features = false, features = ["google-firestore-v1"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+# `sqlite` bundles the SQLite C library (via libsqlite3-sys), so the store needs
+# no system libsqlite3 — the cleanest fit for the nix/devenv build. `macros`
+# gates the `sqlx::migrate!` macro (it lives in sqlx's `macros` module); it does
+# not draw in compile-time query checking here, because persistence uses the
+# runtime `sqlx::query` API rather than `query!`, so no DATABASE_URL or `.sqlx`
+# prepare step is needed to build.
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+
+[dev-dependencies]
+pbr-client = { path = "../pbr-client", features = ["dev-mint"] }
+tempfile = "3"

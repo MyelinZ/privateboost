@@ -1,0 +1,31 @@
+name: rust_lib_privateboost_app
+description: "Utility to build Rust code"
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  plugin_platform_interface: ^2.0.2
+
+dev_dependencies:
+  ffi: ^2.0.2
+  ffigen: ^11.0.0
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  plugin:
+    platforms:
+      # iOS-only. The other platforms prebuild the Rust lib out-of-band
+      # (app/build_android.sh) because cargokit's Gradle path breaks under
+      # Gradle 9 / AGP 9; declaring them here would re-trigger that failing
+      # build. cargokit's iOS podspec build is unaffected, so iOS drives the
+      # Rust build through this plugin.
+      ios:
+        ffiPlugin: true

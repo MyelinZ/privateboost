@@ -1,0 +1,39 @@
+# Aggregator for the local 4-process cluster.
+# Paths are relative to the repository root: run from there.
+#
+# The aggregator boots hosting no session. Start one over the admin plane
+# once the cluster is up — `just demo-session`, or `pbr-admin create-session`
+# directly — see deploy/README.md. `admin_token` below is a committed DEV
+# token: this cluster is loopback-only with committed dev keys already (see
+# [auth]), so it is not a new secret class.
+listen = "127.0.0.1:42800"
+internal_shareholder_endpoints = [
+    "http://127.0.0.1:42811",
+    "http://127.0.0.1:42812",
+    "http://127.0.0.1:42813",
+]
+# Client-facing shareholder ports (see deploy/local/shareholder-*.toml
+# `listen`); handed to clients via EnrollSession so a client needs only this
+# aggregator's URL + a token to bootstrap.
+client_shareholder_endpoints = [
+    "http://127.0.0.1:42801",
+    "http://127.0.0.1:42802",
+    "http://127.0.0.1:42803",
+]
+threshold = 2
+# SQLite session store, relative to the repo root the servers run from. A
+# restart re-serves its history (in-flight sessions demoted to Failed).
+state_path = "deploy/local/state/sessions.sqlite"
+admin_token = "dev-admin-token"
+
+# Datasets this cluster accepts CreateSession requests for. heart_disease is
+# the pbr-e2e reference configuration's dataset (13 features).
+[datasets]
+heart_disease = 13
+
+[auth]
+issuer = "https://test-issuer.local"
+audience = "pbr"
+static_keys = [
+    { kid = "test-1", public_key_pem_path = "crates/pbr-server/tests/fixtures/test_key.pub.pem" },
+]

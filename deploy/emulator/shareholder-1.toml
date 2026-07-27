@@ -1,0 +1,13 @@
+# Shareholder x=1 — EMULATOR demo (real Firebase token verification).
+# Single-client demo: min_clients = 1 (NOT privacy-preserving; proves the
+# vertical slice, not the anonymity guarantee).
+x_coord = 1
+min_clients = 1
+listen = "127.0.0.1:42801"
+internal_listen = "127.0.0.1:42811"
+
+[auth]
+issuer = "https://securetoken.google.com/pboost-test-12345"
+audience = "pboost-test-12345"
+static_keys = []
+google_jwks_url = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"

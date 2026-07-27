@@ -1,0 +1,378 @@
+syntax = "proto3";
+package privateboost.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+message Ack {}
+
+// One party's Shamir share of a dense vector. x is that party's evaluation
+// point, 1..=n_parties; a shareholder rejects a share whose x is not its own.
+// values are canonical residues mod p = 2^61 - 1 (a value >= p is rejected at
+// decode), each element a fixed-point f64 scaled by 2^24
+// (pbr_core::crypto::encoding). SessionConfig.threshold shares reconstruct
+// the vector.
+message ShareVector {
+  uint32 x = 1;
+  repeated uint64 values = 2;
+}
+
+// One client's stats-round contribution to one shareholder; decodes into
+// pbr_core::CommittedStatsShare.
+message StatsShareSubmission {
+  // 32 bytes: sha256 over (round_id, client_id, nonce), pbr_core's `commit`.
+  // A client sends the same commitment to every shareholder, and the
+  // aggregator sums only commitments it finds on all the shareholders it
+  // selects, so a client whose commitment differs between them contributes
+  // nothing.
+  bytes commitment = 1;
+  // Share of [Σf_0, Σf_0², …, Σf_{n-1}, Σf_{n-1}², Σt, Σt², n] summed over
+  // this client's own records: 2 * n_features + 3 elements, record count
+  // last (pbr_core's `Client::compute_stat_shares`). The count travels
+  // inside the shared vector, so only the fleet-wide total ever
+  // reconstructs.
+  ShareVector share = 2;
+  // Which session's pool this lands in. A shareholder keeps one pool per
+  // session and a commitment names no session, so without this a concurrent
+  // session's stats would land in the wrong pool. See
+  // SessionConfig.session_id.
+  string session_id = 3;
+}
+
+// One node's histograms inside a GradientBatchSubmission.
+message GradientEntry {
+  // One of the round's RoundContext.active_node_ids; 0 at depth 0.
+  uint32 node_id = 1;
+  // Share of the gradient histogram followed by the hessian histogram: one
+  // slot each per (feature, bin) of the session's layout, features in
+  // RoundContext.bin_edges order and edges.len() slots per feature (see
+  // NumericEdges). Both halves carry every slot, so which features and bins
+  // this client's records fall in is not recoverable from the message.
+  ShareVector share = 2;
+}
+
+// A client's whole gradient contribution for one round to one shareholder:
+// one entry per node in RoundContext.active_node_ids, all under one
+// commitment, stored all-or-nothing. A commitment in a shareholder's pool
+// therefore always stands for every entry of its batch, which is what makes
+// the aggregator's cross-shareholder commitment intersection a node-level
+// consistency check.
+message GradientBatchSubmission {
+  uint64 round_id = 1;  // RoundContext.round_id of the round being answered
+  uint32 depth = 2;     // RoundContext.depth of that round
+  bytes commitment = 3; // 32 bytes; one per client per round, repeated on every entry
+  repeated GradientEntry entries = 4;
+  // See StatsShareSubmission.session_id. Round ids repeat across sessions
+  // (every session's stats round is id 1), so round_id does not identify the
+  // pool.
+  string session_id = 5;
+}
+
+// Which of a session's two share pools an internal-plane call addresses.
+enum SharePhase {
+  SHARE_PHASE_UNSPECIFIED = 0;
+  SHARE_PHASE_STATS = 1;
+  SHARE_PHASE_GRADIENT = 2;
+}
+
+message ListCommitmentsRequest {
+  SharePhase phase = 1;
+  uint32 depth = 2; // gradient phase only
+  string session_id = 3;
+}
+
+// What the pool holds for the round being gathered: the contributing
+// clients' commitments and, in the gradient phase, the node ids entries were
+// stored for. Two independent sets, not index-paired.
+message CommitmentList {
+  repeated bytes commitments = 1;
+  repeated uint32 node_ids = 2; // gradient phase only
+}
+
+message GetSumsRequest {
+  SharePhase phase = 1;
+  uint32 depth = 2;             // gradient phase only
+  // The clients to sum over. Fewer than the shareholder's configured
+  // min_clients is refused: the anonymity floor is enforced here, not left
+  // to the caller.
+  repeated bytes commitments = 3;
+  uint32 node_id = 4;           // gradient phase only
+  // Which session's pool to sum. Must match the ListCommitments call the
+  // commitments came from, or the sum is taken over a different pool.
+  string session_id = 5;
+}
+
+// The GetSums answer: the selected shares added pointwise, still at this
+// shareholder's evaluation point x.
+message SumShare {
+  ShareVector share = 1;
+}
+
+// Client-facing; authenticated by bearer JWT.
+service ShareholderService {
+  // Stores one client's stats contribution in the session's pool.
+  rpc SubmitStatsShares(StatsShareSubmission) returns (Ack);
+  // Stores a client's whole per-round gradient batch: all entries or none.
+  rpc SubmitGradientBatch(GradientBatchSubmission) returns (Ack);
+}
+
+// Aggregator-facing; bound to loopback only, no auth.
+service ShareholderInternal {
+  // Returns what the session's pool holds for the round being gathered.
+  rpc ListCommitments(ListCommitmentsRequest) returns (CommitmentList);
+  // Sums the stored shares under the given commitments (for one node in the
+  // gradient phase) into this shareholder's aggregate share.
+  rpc GetSums(GetSumsRequest) returns (SumShare);
+  // Starts accepting submissions for a round in the session's pool.
+  rpc OpenRound(OpenRoundRequest) returns (Ack);
+  // Stops accepting submissions; the gather runs after this. Rejects a round
+  // other than the one currently open, so a stale close cannot mark this
+  // shareholder frozen for a round it never held.
+  rpc CloseRound(CloseRoundRequest) returns (Ack);
+  // Frees a finished session's share pool. Idempotent: a session that was
+  // never opened, or was already ended, acks without error.
+  rpc EndSession(EndSessionRequest) returns (Ack);
+}
+
+enum SessionPhase {
+  SESSION_PHASE_UNSPECIFIED = 0;
+  SESSION_PHASE_STATS_PENDING = 1;
+  SESSION_PHASE_TRAINING = 2;
+  SESSION_PHASE_COMPLETED = 3;
+  SESSION_PHASE_FAILED = 4;
+}
+
+// One feature's histogram bin edges (pbr_core::BinConfiguration on the wire),
+// ascending and bracketed by -inf and +inf. A value falls in the slot of the
+// last edge that is <= it, so the feature occupies edges.len() slots of every
+// dense gradient vector; the session-wide set fixes that layout.
+message NumericEdges { uint32 feature_idx = 1; repeated double edges = 2; }
+
+// One committed split of the tree being grown, keyed by its node id in
+// RoundContext.splits_so_far. The id lives only in the map key, so one node
+// cannot carry two conflicting descriptions. A client routes a record from
+// node 0, taking left_child_id while features[feature_idx] <= threshold, and
+// submits under the id it stops at. Child ids are handed out as splits are
+// recorded, not level-order: they are not 2k+1 / 2k+2.
+message SplitNode {
+  uint32 feature_idx = 1;
+  double threshold = 2;
+  uint32 left_child_id = 3;
+  uint32 right_child_id = 4;
+}
+
+// A tree crosses the wire as a flat node array (TreeProto.nodes) rather than
+// as recursively nested messages, so decoding a deep tree can never hit a
+// proto runtime's recursion-depth limit; pbr-proto's convert layer flattens
+// `pbr_core`'s recursive `TreeNode` and rebuilds it. Only the fields
+// `predict_one` routes on are carried (`gain` is dropped and restored as
+// 0.0), so the roundtrip is prediction-equivalent, not field-exact.
+message LeafProto { double value = 1; }
+message SplitProto {
+  uint32 feature_idx = 1;
+  double threshold = 2; // features[feature_idx] <= threshold goes left
+  // Indices into the owning TreeProto.nodes. The encoder emits pre-order, so
+  // both are strictly greater than the node's own index; the decoder rejects
+  // anything else, which also rules out reference cycles.
+  uint32 left = 3;
+  uint32 right = 4;
+}
+message TreeNodeProto {
+  oneof node {
+    LeafProto leaf = 1;
+    SplitProto split = 2;
+  }
+}
+// nodes[0] is the root; every other node is referenced by exactly one split.
+message TreeProto { repeated TreeNodeProto nodes = 1; }
+// The boosted model as grown so far: one tree per completed boosting round,
+// predicting initial_prediction + learning_rate * Σ tree(x). Carried in
+// RoundContext so a client can compute residual gradients from a cold wake,
+// holding no state between polls.
+message ModelProto {
+  double initial_prediction = 1;
+  double learning_rate = 2;
+  repeated TreeProto trees = 3;
+}
+
+message EnrollRequest {
+  // Which session to join. Empty means "this process's only live session",
+  // which is what a client that has not listed sessions sends; an aggregator
+  // hosting several refuses an empty selector rather than guessing.
+  string session_id = 1;
+}
+message SessionConfig {
+  repeated NumericEdges bin_edges = 1;         // empty until the stats round is gathered
+  SessionPhase phase = 2;
+  uint32 n_features = 3;
+  // This session's identity: a UUID minted when the session is created, and
+  // stable from then on, including across an aggregator restart (the SQLite
+  // session store reloads sessions under the same id). Every other
+  // session_id field in this file carries this value back.
+  string session_id = 4;
+  // Shamir reconstruction threshold: how many shareholders' shares
+  // reconstruct a sum. Fixed by the deployment, the same for every session.
+  uint32 threshold = 5;
+  uint32 n_parties = 6;                        // number of shareholders, = shareholder_endpoints.len()
+  // Client-facing shareholder URLs, ordered by Shamir evaluation point
+  // x = 1, 2, 3, …: entry i takes the share with ShareVector.x = i + 1.
+  // These are not the aggregator's internal (loopback-only) shareholder
+  // endpoints.
+  repeated string shareholder_endpoints = 7;
+}
+
+message PollSessionRequest {
+  // The round this client already has. The aggregator answers with its
+  // current context unless that context's round_id equals this, in which
+  // case the body is nothing_new. The proto default 0 is never a round id,
+  // so a fresh client always receives the current context.
+  uint64 last_seen_round_id = 1;
+  // The session this client enrolled in; see SessionConfig.session_id.
+  // Round ids are unique only within a session, so a poll without it could
+  // be answered from another session's round.
+  string session_id = 2;
+}
+// Everything a client needs to compute and submit one round from a cold
+// wake: clients hold no state between polls, so the context is
+// self-contained (bin layout, splits, model, deadline).
+message RoundContext {
+  uint32 tree_idx = 1;
+  // The gradient round's tree depth, 0 at the root; u32::MAX in the stats
+  // round and in the final completed context.
+  uint32 depth = 2;
+  // Nonzero and strictly increasing across the session: 1 for the stats
+  // round, ((tree_idx + 1) << 32) | depth for a gradient round, and a value
+  // above all of those for the completed context. Clients read tree_idx and
+  // depth from the fields; the id itself only has to compare equal to a
+  // previous PollSessionRequest.last_seen_round_id.
+  uint64 round_id = 3;
+  // The nodes a gradient round expects one GradientEntry each for; empty in
+  // the stats round and in the completed context.
+  repeated uint32 active_node_ids = 4;
+  map<uint32, SplitNode> splits_so_far = 5;
+  repeated NumericEdges bin_edges = 6;
+  ModelProto model = 7;
+  // When the aggregator stops waiting for this round; unset on the completed
+  // context.
+  google.protobuf.Timestamp submission_deadline = 8;
+  string session_id = 9;                       // see SessionConfig.session_id
+}
+message PollSessionResponse {
+  // nothing_new: the round in last_seen_round_id is still the current one.
+  oneof body { RoundContext ctx = 1; google.protobuf.Empty nothing_new = 2; }
+  google.protobuf.Duration next_poll_after = 3; // advisory poll cadence
+  // A session still running when its aggregator process died comes back
+  // SESSION_PHASE_FAILED, so this, not a changed session_id, is what tells a
+  // polling client the session it enrolled in can no longer finish.
+  SessionPhase phase = 4;
+  // The session this response describes, stamped on every response including
+  // nothing_new: a client that polled with an empty selector learns from it
+  // which session answered. See SessionConfig.session_id.
+  string session_id = 5;
+}
+
+// An OpenRound for a session the daemon has not seen creates that session's
+// pool alongside the pools it already holds; opening a different round
+// within a session clears that session's stored shares. Pools are reclaimed
+// by EndSession or by the daemon's idle-TTL sweep.
+message OpenRoundRequest {
+  uint64 round_id = 1; uint32 depth = 2; SharePhase phase = 3; string session_id = 4;
+}
+message CloseRoundRequest {
+  uint64 round_id = 1; uint32 depth = 2; SharePhase phase = 3; string session_id = 4;
+}
+message EndSessionRequest { string session_id = 1; }
+
+// The platform a device self-reports when registering. Nothing routes on it
+// today: the FCM sender ships both the android and apns config blocks on
+// every push. UNSPECIFIED is rejected at RegisterDevice.
+enum ClientPlatform {
+  CLIENT_PLATFORM_UNSPECIFIED = 0;
+  CLIENT_PLATFORM_ANDROID = 1;
+  CLIENT_PLATFORM_IOS = 2;
+}
+
+message RegisterDeviceRequest {
+  string fcm_token = 1;
+  ClientPlatform platform = 2;
+}
+
+message ListSessionsRequest {}
+
+// What a device needs to choose a session: which one it is, how far along it
+// is, and the feature width its records must match.
+message SessionSummary {
+  string session_id = 1;
+  SessionPhase phase = 2;
+  uint32 n_features = 3;
+  // The dataset this session trains on. A device selects which of its own
+  // records to submit by this id; n_features is a width cross-check on that
+  // choice, never the selector. Empty only for a dataset-less session
+  // created in-process for tests; production sessions always carry one.
+  string dataset_id = 4;
+  // When the aggregator created this session, on its own wall clock. Session
+  // ids are random UUIDs, so this is the wire's only recency signal: it
+  // orders the sessions one aggregator hosts, not sessions across hosts.
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message SessionList { repeated SessionSummary sessions = 1; }
+
+// Client-facing; authenticated by bearer JWT.
+service AggregatorService {
+  // Joins a session and returns its parameters, including the client-facing
+  // shareholder endpoints to submit shares to.
+  rpc EnrollSession(EnrollRequest) returns (SessionConfig);
+  // Returns the current round context (or nothing_new) plus a suggested
+  // next-poll delay; a woken client performs exactly one poll per step.
+  rpc PollSession(PollSessionRequest) returns (PollSessionResponse);
+  // Binds the caller's FCM token to the identity the JWT interceptor
+  // verified, so a round opening can wake the device with a silent push. A
+  // device cannot register a token under another identity.
+  rpc RegisterDevice(RegisterDeviceRequest) returns (Ack);
+  // Enumerates hosted sessions so a device can choose one to enroll in.
+  rpc ListSessions(ListSessionsRequest) returns (SessionList);
+}
+
+// What an operator submits to schedule a session. Deployment-wide settings
+// (shareholder endpoints, Shamir threshold, auth, TLS) are not here: they
+// come from the server config and cannot differ between sessions.
+message CreateSessionRequest {
+  string dataset_id = 1;
+  string title = 2; // operator-facing label; stored, never interpreted
+  uint32 n_trees = 3;
+  uint32 max_depth = 4;
+  uint32 n_bins = 5;
+  double learning_rate = 6;
+  double lambda = 7;
+  // A round closes early once target_clients submissions have landed on
+  // every shareholder; short of that it keeps extending its submission
+  // window, and a round still below min_clients after a fixed number of
+  // windows (pbr-server's GIVE_UP_WINDOWS) fails the session.
+  uint32 min_clients = 8;
+  uint32 target_clients = 9;
+  uint64 submission_window_ms = 10;
+}
+
+message DeleteSessionRequest { string session_id = 1; }
+
+// Session administration. Authenticated by a static admin bearer token from
+// the aggregator's config, not by the device identity provider, so a
+// signed-in device can never reach it.
+service AdminService {
+  // Schedules one training session on the running cluster and returns the
+  // created session's summary.
+  rpc CreateSession(CreateSessionRequest) returns (SessionSummary);
+  // Enumerates hosted sessions: the same payload as
+  // AggregatorService.ListSessions, under admin auth instead of the device
+  // JWT an operator does not hold.
+  rpc ListSessions(ListSessionsRequest) returns (SessionList);
+  // Removes one session by id, in any phase. A live session's round loop is
+  // aborted and its shareholder pools freed (best-effort: an OpenRound
+  // already in flight when the abort lands can recreate a pool, which the
+  // idle-TTL sweep then reclaims); a terminal session just leaves the hosted
+  // list. The removal is written to state_path before the RPC returns, so a
+  // deleted session stays gone across a restart.
+  rpc DeleteSession(DeleteSessionRequest) returns (Ack);
+}

@@ -1,0 +1,13 @@
+# Shareholder x=1 for the local 4-process cluster.
+# Paths are relative to the repository root: run from there.
+x_coord = 1
+min_clients = 10
+listen = "127.0.0.1:42801"
+internal_listen = "127.0.0.1:42811"
+
+[auth]
+issuer = "https://test-issuer.local"
+audience = "pbr"
+static_keys = [
+    { kid = "test-1", public_key_pem_path = "crates/pbr-server/tests/fixtures/test_key.pub.pem" },
+]

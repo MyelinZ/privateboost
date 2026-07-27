@@ -1,0 +1,3 @@
+# FCM background wake — app-side logcat (device time)
+FLTFireMsgReceiver: broadcast received for message
+flutter : privateboost fcm wake: completed=true rounds=4 error=null

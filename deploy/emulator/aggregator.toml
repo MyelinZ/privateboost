@@ -1,0 +1,41 @@
+# Aggregator — EMULATOR demo. Verifies REAL Firebase ID tokens (Google JWKS).
+#
+# The aggregator boots hosting no session. Start one over the admin plane
+# once the cluster is up — `just demo-session heart_disease 1 1` (min/target
+# 1 matches this single-device demo's shareholder floor below; it is a
+# functional demo, NOT a privacy config) — see app/README.md.
+# `admin_token` below is a committed DEV token: this cluster is loopback-only
+# with committed dev keys already, so it is not a new secret class.
+listen = "127.0.0.1:42800"
+internal_shareholder_endpoints = [
+    "http://127.0.0.1:42811",
+    "http://127.0.0.1:42812",
+    "http://127.0.0.1:42813",
+]
+client_shareholder_endpoints = [
+    "http://127.0.0.1:42801",
+    "http://127.0.0.1:42802",
+    "http://127.0.0.1:42803",
+]
+threshold = 2
+# SQLite session store, relative to the repo root the servers run from. A
+# restart re-serves its history (in-flight sessions demoted to Failed).
+state_path = "deploy/emulator/state/sessions.sqlite"
+admin_token = "dev-admin-token"
+
+# The app's bundled default dataset (see app/lib/dataset.dart); 13 features.
+[datasets]
+heart_disease = 13
+
+[auth]
+issuer = "https://securetoken.google.com/pboost-test-12345"
+audience = "pboost-test-12345"
+static_keys = []
+google_jwks_url = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+
+# Real FCM silent push (ADC token source — no service-account key).
+[fcm]
+project_id = "pboost-test-12345"
+# Demo cadence so a live demo sees pushes within minutes; production keeps
+# the 15-minute default. Like min_clients = 1, NOT a production setting.
+interval_minutes = 2

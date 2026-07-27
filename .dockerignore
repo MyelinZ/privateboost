@@ -1,0 +1,5 @@
+target/
+app/
+.git/
+docs/
+deploy/hetzner/secrets/

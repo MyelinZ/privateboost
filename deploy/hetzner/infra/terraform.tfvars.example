@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars and adjust as needed. The Hetzner token is NOT set
+# here — it comes from the HCLOUD_TOKEN environment variable (see README.md).
+
+# server_type         = "cx23"                  # Intel 2 vCPU / 4 GB
+# location            = "fsn1"                   # any x86 region
+# ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+# ssh_allowed_cidrs   = ["1.2.3.4/32"]           # lock SSH to your IP

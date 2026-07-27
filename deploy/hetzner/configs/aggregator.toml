@@ -1,0 +1,76 @@
+# Aggregator — Hetzner single-VM production. Verifies REAL Firebase ID tokens
+# (Google JWKS) and pushes round-open notifications over FCM with a
+# service-account key. The client-facing listener is TLS and binds 0.0.0.0 so
+# phones can reach it; the internal gather plane stays plaintext loopback.
+# <VM_IP> and <ADMIN_TOKEN> are placeholders substituted at deploy time by
+# ship.sh (the IP from terraform, the token from secrets/admin-token).
+#
+# The aggregator boots hosting no session. The three phones each run ONE
+# batch client (their PBR_BATCH_ID slice of the train split, submitted as a
+# single Client::new_batch) and join a heart_disease session that an operator
+# creates explicitly on the admin plane once the stack is up; its
+# hyperparameters and round-close policy come entirely from the pbr-admin
+# create-session flags (--min-clients / --target-clients / --window-ms), not
+# from anything in this file. See deploy/hetzner/README.md's "Fleet capture
+# run".
+listen = "0.0.0.0:42800"
+internal_shareholder_endpoints = [
+    "http://127.0.0.1:42811",
+    "http://127.0.0.1:42812",
+    "http://127.0.0.1:42813",
+]
+client_shareholder_endpoints = [
+    "https://<VM_IP>:42801",
+    "https://<VM_IP>:42802",
+    "https://<VM_IP>:42803",
+]
+threshold = 2
+# Bearer token guarding the admin plane; without it CreateSession is refused
+# and the phones would have no dataset session to join. A secret: ship.sh
+# substitutes it from secrets/admin-token, never committed.
+admin_token = "<ADMIN_TOKEN>"
+# Mandatory SQLite session store; mounted from a host volume by
+# docker-compose.yml. A restart re-serves its history (in-flight sessions
+# demoted to Failed).
+state_path = "/state/sessions.sqlite"
+
+[auth]
+issuer = "https://securetoken.google.com/pboost-test-12345"
+audience = "pboost-test-12345"
+static_keys = []
+google_jwks_url = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+
+[fcm]
+project_id = "pboost-test-12345"
+service_account_path = "/secrets/fcm-service-account.json"
+
+[tls]
+cert_path = "/secrets/server.crt"
+key_path = "/secrets/server.key"
+
+# Per-tree quality metrics, written straight to Firestore
+# paperSimTreeMetrics by the aggregator itself: each finished tree of a
+# session whose dataset_id appears in [eval.datasets] is scored against that
+# CSV's last 20% (its first 80% is the app's train split for the dataset).
+# The service-account key needs Firestore write (roles/datastore.user); the
+# FCM-only key gets a permission error. If any of this fails to build, the
+# aggregator refuses to start — a measurement run must not train unmeasured.
+[eval]
+project_id = "pboost-test-12345"
+service_account_path = "/secrets/firestore-sa.json"
+
+[eval.datasets]
+heart_disease = "/data/heart_disease.csv"
+breast_cancer = "/data/breast_cancer.csv"
+pima_diabetes = "/data/pima_diabetes.csv"
+cdc_diabetes = "/data/cdc_diabetes.csv"
+
+# Datasets this cluster accepts sessions for (`id = n_features`). CreateSession
+# validates an admin-submitted spec's dataset_id and feature count against this
+# table; the fleet capture creates one session per dataset here.
+# Must be the last table in the file (a sub-table absorbs everything after it).
+[datasets]
+heart_disease = 13
+breast_cancer = 30
+pima_diabetes = 8
+cdc_diabetes = 21

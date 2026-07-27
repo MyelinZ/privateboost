@@ -1,0 +1,34 @@
+# Nextest runs every test in its own process, scheduled globally across all
+# test binaries; the per-group limit below replaces a global --test-threads
+# cap that would punish the whole suite for the e2e tests.
+
+[test-groups]
+# Subprocess e2e: each test spawns a real 4-process release cluster on
+# reserved loopback ports; strictly serial.
+serial = { max-threads = 1 }
+
+[profile.default]
+# Print only failures during the run (plus the final summary line); pass
+# `--status-level pass` to watch live progress.
+status-level = "fail"
+final-status-level = "fail"
+# Anything past 2x60s in the fast tier is hung, not slow — kill it instead
+# of wedging the run. The e2e override below allows the minutes-long runs.
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+[[profile.default.overrides]]
+# The 56-config wire sweep (`just e2e-wire-cost`) brings up a fresh TLS cluster
+# per config and runs ~30-40 min end to end — longer than the AUC-gate
+# override below allows. Listed first so it wins (nextest overrides are
+# first-match-wins per setting); no terminate-after, so it is flagged slow
+# but never force-killed mid-sweep.
+filter = 'package(pbr-e2e) and test(=wire_grid_sweep)'
+test-group = 'serial'
+slow-timeout = { period = "300s" }
+
+[[profile.default.overrides]]
+# Builds the release server/client binaries in-test, then trains a
+# 4-process cluster to the AUC gate: legitimately minutes-long.
+filter = 'package(pbr-e2e)'
+test-group = 'serial'
+slow-timeout = { period = "300s", terminate-after = 4 }

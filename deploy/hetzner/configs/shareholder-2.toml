@@ -1,0 +1,22 @@
+# Shareholder x=2 — Hetzner single-VM production (real Firebase token
+# verification). Client-facing listener is TLS and binds 0.0.0.0 for phones;
+# the internal listener stays on loopback.
+# min_clients = 3: refuse to release any aggregate reconstructed from fewer
+# than 3 clients' shares. This is the 3-DEVICE FLEET floor (one batch client
+# per phone), a functional-demo size, NOT a privacy-grade anonymity set --
+# deploy/local and the pbr-e2e run keep the 10-client floor. A 3-device
+# capture reports engineering feasibility, not an anonymity guarantee.
+x_coord = 2
+min_clients = 3
+listen = "0.0.0.0:42802"
+internal_listen = "127.0.0.1:42812"
+
+[auth]
+issuer = "https://securetoken.google.com/pboost-test-12345"
+audience = "pboost-test-12345"
+static_keys = []
+google_jwks_url = "https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com"
+
+[tls]
+cert_path = "/secrets/server.crt"
+key_path = "/secrets/server.key"

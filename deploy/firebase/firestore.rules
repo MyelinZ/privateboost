@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Round metrics: each user reads/writes only their own docs.
+    // Append-only. The client further filters reads by deviceId.
+    match /roundMetrics/{doc} {
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null
+                    && resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+    // Per-round systems telemetry, written by the app under Firebase Auth.
+    // Same own-uid create / own-uid read / append-only contract as roundMetrics.
+    match /paperSimRoundMetrics/{doc} {
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow read:   if request.auth != null
+                    && resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+    // Per-tree quality metrics. Only the aggregator's admin service-account
+    // writes here, and only ADC reads it back; both bypass security rules,
+    // so every authenticated-client path is denied.
+    match /paperSimTreeMetrics/{doc} {
+      allow read, write: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

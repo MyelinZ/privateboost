@@ -1,0 +1,58 @@
+# Hetzner single-VM stack: one aggregator plus three shareholders, all sharing
+# the host network so the internal gather plane stays on 127.0.0.1 while the
+# client-facing listeners bind 0.0.0.0 for phones. Build the image first with
+# deploy/hetzner/Dockerfile (tag pbr-server:deploy); see README.md.
+services:
+  aggregator:
+    image: pbr-server:deploy
+    command: ["--role", "aggregator", "--config", "/config.toml"]
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/aggregator.toml:/config.toml:ro
+      - ./secrets/server.crt:/secrets/server.crt:ro
+      - ./secrets/server.key:/secrets/server.key:ro
+      - ./secrets/fcm-service-account.json:/secrets/fcm-service-account.json:ro
+      - ./secrets/firestore-sa.json:/secrets/firestore-sa.json:ro
+      # Writable state for the aggregator's session list (state_path in
+      # aggregator.toml). Docker creates /opt/pbr/state on first `up`; the
+      # session history survives a container restart.
+      - ./state:/state
+
+  shareholder-1:
+    image: pbr-server:deploy
+    command: ["--role", "shareholder", "--config", "/config.toml"]
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/shareholder-1.toml:/config.toml:ro
+      - ./secrets/server.crt:/secrets/server.crt:ro
+      - ./secrets/server.key:/secrets/server.key:ro
+
+  shareholder-2:
+    image: pbr-server:deploy
+    command: ["--role", "shareholder", "--config", "/config.toml"]
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/shareholder-2.toml:/config.toml:ro
+      - ./secrets/server.crt:/secrets/server.crt:ro
+      - ./secrets/server.key:/secrets/server.key:ro
+
+  shareholder-3:
+    image: pbr-server:deploy
+    command: ["--role", "shareholder", "--config", "/config.toml"]
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      RUST_LOG: info
+    volumes:
+      - ./configs/shareholder-3.toml:/config.toml:ro
+      - ./secrets/server.crt:/secrets/server.crt:ro
+      - ./secrets/server.key:/secrets/server.key:ro

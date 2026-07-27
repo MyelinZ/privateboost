@@ -1,0 +1,15 @@
+# Shareholder x=3 — local docker-compose smoke (dev issuer, TLS with a
+# 127.0.0.1 cert). Single-client demo: min_clients = 1 (NOT privacy-preserving).
+x_coord = 3
+min_clients = 1
+listen = "127.0.0.1:42803"
+internal_listen = "127.0.0.1:42813"
+
+[auth]
+issuer = "https://test-issuer.local"
+audience = "pbr"
+static_keys = [{ kid = "test-1", public_key_pem_path = "/secrets/issuer.pub.pem" }]
+
+[tls]
+cert_path = "/secrets/server.crt"
+key_path = "/secrets/server.key"

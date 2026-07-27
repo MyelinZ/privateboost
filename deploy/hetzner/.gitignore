@@ -1,0 +1,5 @@
+# Deployment secrets are generated locally and never committed, except the
+# public CA certificate (bundled into the app) and the directory marker.
+secrets/*
+!secrets/.gitkeep
+!secrets/ca.crt

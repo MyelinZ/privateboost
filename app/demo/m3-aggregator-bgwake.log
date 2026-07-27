@@ -1,0 +1,7 @@
+[2m2026-07-17T15:51:03.538615Z[0m [32m INFO[0m [2mpbr_server[0m[2m:[0m aggregator up [3maddr[0m[2m=[0m127.0.0.1:42800
+[2m2026-07-17T15:51:43.343637Z[0m [32m INFO[0m [2mpbr_server::aggregator[0m[2m:[0m stats phase complete, bins defined [3mn_features[0m[2m=[0m13
+[2m2026-07-17T15:51:43.344213Z[0m [32m INFO[0m [2mpbr_server::aggregator[0m[2m:[0m round_open push notifications sent [3mround_id[0m[2m=[0m4294967296 [3msent[0m[2m=[0m1
+[2m2026-07-17T15:51:48.415954Z[0m [32m INFO[0m [2mpbr_server::aggregator[0m[2m:[0m tree finished [3mtrees[0m[2m=[0m1
+[2m2026-07-17T15:51:53.489622Z[0m [32m INFO[0m [2mpbr_server::aggregator[0m[2m:[0m tree finished [3mtrees[0m[2m=[0m2
+[2m2026-07-17T15:51:58.351421Z[0m [32m INFO[0m [2mpbr_server::aggregator[0m[2m:[0m tree finished [3mtrees[0m[2m=[0m3
+[2m2026-07-17T15:51:58.351439Z[0m [32m INFO[0m [2mpbr_server::aggregator[0m[2m:[0m session completed

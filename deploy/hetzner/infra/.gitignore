@@ -1,0 +1,9 @@
+# Terraform working dir + state may hold resource IDs and sensitive values.
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+
+# Local variable overrides (may contain anything); keep the example.
+*.tfvars
+!*.tfvars.example

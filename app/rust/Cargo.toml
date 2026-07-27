@@ -1,0 +1,37 @@
+[package]
+name = "rust_lib_privateboost_app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.12.0"
+pbr-client = { path = "../../crates/pbr-client" }
+anyhow = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+log = "0.4"
+
+# Route Rust logs to Android logcat on device; unused (and not compiled) on
+# the host, where tests and `cargo build` run.
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15"
+
+[dev-dependencies]
+# The `cluster` tests in src/api/mobile.rs mint dev JWTs via
+# `pbr_client::jwt`, which is gated behind pbr-client's default-off `dev-mint`
+# feature. Enable it here so it reaches test builds only; the cdylib `.so`
+# built from [dependencies] stays free of `jsonwebtoken`.
+pbr-client = { path = "../../crates/pbr-client", features = ["dev-mint"] }
+pbr-server = { path = "../../crates/pbr-server" }
+
+# `#[frb(...)]` attributes emit a `frb_expand` cfg the codegen tool checks
+# for; without this, rustc's `unexpected_cfgs` lint flags it.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+# Standalone workspace: app/rust is not a member of the repo's root
+# [workspace] (crates/*), so it needs its own so cargo doesn't treat it as a
+# stray path dependency outside any workspace.
+[workspace]
