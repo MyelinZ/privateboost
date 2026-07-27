@@ -52,6 +52,9 @@ TRIGGER_DISPLAY = {"push": "Remote wakeup", "workmanager": "Periodic"}
 TRIGGER_MARKERS = {"push": "o", "workmanager": "s"}
 
 
+PANEL_LETTERS = "abcdefgh"
+
+
 def load_learning_curves():
     curves = {}
     for ds in DATASETS:
@@ -87,14 +90,14 @@ def generate_learning_curves(curves):
         xgb_key = f"{ds}_xgb"
         if xgb_key in curves:
             df = curves[xgb_key]
-            for method, style, color in [
+            for method, linestyle, color in [
                 ("xgb_matched", "--", COLORS["xgb_matched"]),
                 ("xgb_default", ":", COLORS["xgb_default"]),
             ]:
                 sub = df[df["method"] == method]
                 if not sub.empty:
                     grouped = sub.groupby("n_trees")[metric].agg(["mean", "std"]).reset_index()
-                    ax.plot(grouped["n_trees"], grouped["mean"], style,
+                    ax.plot(grouped["n_trees"], grouped["mean"], linestyle,
                             color=color, linewidth=0.9)
                     ax.fill_between(grouped["n_trees"],
                                     grouped["mean"] - grouped["std"],
@@ -107,6 +110,7 @@ def generate_learning_curves(curves):
         ax.set_xlim(0.5, 15.5)
         ax.set_xticks([1, 5, 10, 15])
         ax.grid(True, alpha=0.3)
+        style.panel_label(ax, PANEL_LETTERS[idx])
 
     legend_elements = [
         Line2D([0], [0], color=COLORS["pb"], linewidth=1.0, linestyle="-",
@@ -177,6 +181,7 @@ def generate_dropout_figure():
         ax.set_xlabel("Client dropout rate (%)")
         ax.set_ylabel("AUC-ROC")
         ax.grid(True, alpha=0.3)
+        style.panel_label(ax, PANEL_LETTERS[idx])
 
     fig.tight_layout()
     out = os.path.join(FIGURES_DIR, "dropout_resilience.png")
@@ -283,6 +288,9 @@ def generate_depth_tradeoff():
         ax_cost.grid(axis="y", alpha=0.3)
         ax_cost.set_ylabel("Per-client (MB)", fontsize=7)
 
+        style.panel_label(ax_auc, PANEL_LETTERS[2 * row])
+        style.panel_label(ax_cost, PANEL_LETTERS[2 * row + 1])
+
         # Dataset name as row title above the left subplot
         if row == 0:
             ax_auc.set_title(f"Model quality\n{label}", fontsize=8, pad=4,
@@ -368,6 +376,9 @@ def generate_fleet_auc():
                              rotation=20, fontsize=6)
     ax_comm.set_ylabel("Per-client comm. (MB)")
 
+    style.panel_label(ax_auc, "a")
+    style.panel_label(ax_comm, "b")
+
     fig.tight_layout()
     out = os.path.join(FIGURES_DIR, "fleet_auc.png")
     fig.savefig(out, dpi=300)
@@ -438,6 +449,9 @@ def generate_fleet_participation():
     ax_gap.set_xticklabels([DEVICE_DISPLAY[d] for d in devices],
                             rotation=25, ha="right", fontsize=6)
     ax_gap.set_ylabel("Inter-round interval (min)")
+
+    style.panel_label(ax_trig, "a")
+    style.panel_label(ax_gap, "b")
 
     fig.tight_layout()
     out = os.path.join(FIGURES_DIR, "fleet_participation.png")

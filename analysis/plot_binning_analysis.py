@@ -107,6 +107,7 @@ def main():
         ax_dist.set_title(label, fontsize=9, pad=4)
         ax_dist.set_xticklabels([])
         ax_dist.set_yticks([])
+        style.panel_label(ax_dist, "ab"[col])
 
         # Row 2 compares per-bin occupancy between the two methods.
         all_pcts = {}
@@ -147,6 +148,7 @@ def main():
         ax_bars.set_xlabel("Bin")
 
         ax_bars.grid(axis="y", alpha=0.3)
+        style.panel_label(ax_bars, "cd"[col])
 
     axes[0, 0].set_ylabel("Density", fontsize=8)
     axes[1, 0].set_ylabel("Samples (%)", fontsize=8)

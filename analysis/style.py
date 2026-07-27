@@ -22,6 +22,17 @@ COLORS = {
 }
 
 
+def panel_label(ax, letter):
+    """Mark a subplot with the letter its manuscript caption refers to.
+
+    Captions that address panels as "(a)"/"(b)" have nothing to point at
+    unless the letter is drawn in the artwork; the journal supplies the
+    caption but never adds panel markers to a figure file.
+    """
+    ax.text(0.0, 1.02, f"({letter})", transform=ax.transAxes,
+            fontsize=8, fontweight="bold", va="bottom", ha="left")
+
+
 def apply():
     sns.set_theme(style="ticks", context="paper", font=FONT,
                   rc={
