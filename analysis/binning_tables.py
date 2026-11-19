@@ -1,9 +1,10 @@
 """Reproduce the manuscript's gain-retention and bin-uniformity tables.
 
-Gain retention (Table tab:gain_retention): mean ratio of binned to exact
-split gain per binning method, pooled across all four datasets and
-stratified by feature type, with a two-sided Mann-Whitney U test between
-the per-feature values of the two methods.
+Gain retention (Table tab:gain_retention): average node-level retention
+within each training run and feature-type group, then mean and sample SD
+across five matched splits, separately by dataset. Paired differences are
+Gaussian minus equal-width run means. These are descriptive summaries,
+not independent-node hypothesis tests or confidence intervals.
 
 Bin uniformity (Table tab:bin_uniformity): coefficient of variation of bin
 occupancy per feature under both binning methods, same pooling and
@@ -57,33 +58,45 @@ def load_features():
 
 
 def gain_retention_table(features):
-    """One observation per (split, tree, node): the retention of the chosen
-    split feature. Observations are pooled row-level and stratified by the
-    chosen feature's type; the group sizes shown are the feature-population
-    counts, not observation counts."""
+    """Summarise existing runs; nodes and overlapping splits are not replicates
+    for an independence-based hypothesis test. Features classify selected
+    splits, not independent observations. Exact gain is for the chosen feature.
+    """
     key = {(f["dataset"], f["feature_idx"]): f["continuous"] for f in features}
-    obs = {}
-    for m in METHODS:
-        frames = []
-        for ds in DATASETS:
-            path = os.path.join(RESULTS_DIR, f"{ds}_{m}", "gain_retention.csv")
+    runs = []
+    for ds in DATASETS:
+        for method in METHODS:
+            path = os.path.join(RESULTS_DIR, f"{ds}_{method}", "gain_retention.csv")
             df = pd.read_csv(path)
+            assert set(df["split_id"]) == set(range(5)), path
+            assert not df.duplicated(["split_id", "tree", "node_id"]).any(), path
             df["continuous"] = [key[(ds, i)] for i in df["feature_idx"]]
-            frames.append(df)
-        obs[m] = pd.concat(frames)
-    n_cont = sum(f["continuous"] for f in features)
-
-    print("Gain retention (binned / exact, higher is better)")
-    print(f"{'Features':<12} {'Gaussian':>9} {'Equal-width':>12} {'p':>8}")
-    for label, n, mask in [
-        ("Cont.", n_cont, lambda d: d["continuous"]),
-        ("Disc.", len(features) - n_cont, lambda d: ~d["continuous"]),
-        ("All", len(features), lambda d: d["continuous"] | True),
-    ]:
-        g = obs["gaussian"][mask(obs["gaussian"])]["retention"]
-        u = obs["uniform"][mask(obs["uniform"])]["retention"]
-        p = stats.mannwhitneyu(g, u, alternative="two-sided").pvalue
-        print(f"{label} ({n}){'':<3} {g.mean():>9.3f} {u.mean():>12.3f} {p:>8.3f}")
+            for group, mask in [("Continuous", df["continuous"]),
+                                ("Discrete", ~df["continuous"]),
+                                ("All", pd.Series(True, index=df.index))]:
+                for split_id, part in df[mask].groupby("split_id"):
+                    runs.append(dict(dataset=ds, method=method, group=group,
+                                     split_id=split_id, nodes=len(part),
+                                     retention=part["retention"].mean()))
+    runs = pd.DataFrame(runs)
+    runs.to_csv(os.path.join(RESULTS_DIR, "run_summary.csv"), index=False,
+                float_format="%.10f")
+    rows = []
+    for (ds, group), part in runs.groupby(["dataset", "group"], sort=False):
+        paired = part.pivot(index="split_id", columns="method", values="retention")
+        assert len(paired) == 5 and not paired.isna().any().any(), (ds, group)
+        diff = paired["gaussian"] - paired["uniform"]
+        rows.append(dict(dataset=ds, group=group, n_runs=len(paired),
+                         gaussian_mean=paired["gaussian"].mean(),
+                         gaussian_sd=paired["gaussian"].std(ddof=1),
+                         uniform_mean=paired["uniform"].mean(),
+                         uniform_sd=paired["uniform"].std(ddof=1),
+                         difference_mean=diff.mean(), difference_sd=diff.std(ddof=1)))
+    summary = pd.DataFrame(rows)
+    summary.to_csv(os.path.join(RESULTS_DIR, "descriptive_summary.csv"), index=False,
+                   float_format="%.10f")
+    print("Gain retention: mean ± sample SD across matched runs (no hypothesis test)")
+    print(summary.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     print()
 
 

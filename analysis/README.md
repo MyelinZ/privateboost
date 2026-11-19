@@ -16,6 +16,17 @@ Every Python module in the repository lives here, driven by the root
 
 Run everything from the repository root, not from this directory.
 
+## Reproduce Table 4
+
+    uv run --locked python analysis/binning_tables.py
+
+The script uses the committed gain-retention experiment outputs to regenerate
+the per-run summaries in `results/gain_retention/run_summary.csv` and the
+matched-split means, sample standard deviations, and paired differences in
+`results/gain_retention/descriptive_summary.csv`. Table 4 reports the latter
+values rounded to three decimal places. The script also prints the bin
+occupancy summary for Table 3.
+
 ## Fleet telemetry
 
 Fetch the two per-simulation metric collections from Firestore:
